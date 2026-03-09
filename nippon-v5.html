@@ -1,0 +1,2281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Nippon Electricals — Smart POS</title>
+<link rel="manifest" href="manifest.json"/>
+<meta name="theme-color" content="#CC0000"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Noto Sans JP',sans-serif;background:#0f0f0f;color:#f0f0f0;min-height:100vh;overflow-x:hidden}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#CC0000;border-radius:2px}
+select option{background:#1a1a1a;color:#f0f0f0}
+input[type=file]{width:100%;background:#242424;border:1.5px dashed #444;border-radius:8px;padding:10px;color:#888;font-size:13px;cursor:pointer}
+input[type=file]::file-selector-button{background:#CC0000;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;margin-right:10px;font-size:12px}
+@media print{body *{visibility:hidden}#bill-print,#bill-print *{visibility:visible}#bill-print{position:fixed;top:0;left:0;width:100%;background:#fff;color:#000;padding:16px;font-family:'Space Mono',monospace;font-size:11px}}
+
+@keyframes fadeUp    {from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn    {from{opacity:0}to{opacity:1}}
+@keyframes slideDown {from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp   {from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes popIn     {0%{opacity:0;transform:scale(0.82)}70%{transform:scale(1.06)}100%{opacity:1;transform:scale(1)}}
+@keyframes spin      {to{transform:rotate(360deg)}}
+@keyframes glow      {0%,100%{box-shadow:0 0 18px #CC000066,0 0 40px #CC000022}50%{box-shadow:0 0 40px #CC0000bb,0 0 80px #CC000044}}
+@keyframes bulbPulse {0%,100%{filter:brightness(1) drop-shadow(0 0 6px #FFD70099)}50%{filter:brightness(1.18) drop-shadow(0 0 22px #FFD700ff)}}
+@keyframes badgePop  {0%{transform:scale(0)}60%{transform:scale(1.4)}100%{transform:scale(1)}}
+@keyframes shimmer   {0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes toastIn   {from{opacity:0;transform:translateX(-50%) translateY(14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes ripple    {to{transform:scale(4);opacity:0}}
+@keyframes navPop    {0%{transform:scale(0.6) translateY(5px)}100%{transform:scale(1) translateY(0)}}
+@keyframes sparkle   {0%,100%{opacity:0;transform:scale(0)}50%{opacity:1;transform:scale(1)}}
+@keyframes float     {0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+
+.anim-fadeUp   {animation:fadeUp   0.32s ease both}
+.anim-fadeIn   {animation:fadeIn   0.22s ease both}
+.anim-slideDown{animation:slideDown 0.3s ease both}
+.anim-popIn    {animation:popIn    0.3s cubic-bezier(.34,1.56,.64,1) both}
+.anim-slideUp  {animation:slideUp  0.36s cubic-bezier(.22,1,.36,1) both}
+.anim-float    {animation:float 3s ease-in-out infinite}
+
+.card-tap{transition:transform 0.14s ease,box-shadow 0.14s ease,background 0.14s ease}
+.card-tap:active{transform:scale(0.97)}
+
+.btn-ripple{position:relative;overflow:hidden}
+.btn-ripple .rip{position:absolute;border-radius:50%;background:rgba(255,255,255,0.3);animation:ripple 0.55s linear;pointer-events:none}
+
+.logo-glow{animation:glow 2.8s ease-in-out infinite;border-radius:20px}
+.bulb-anim{animation:bulbPulse 2.2s ease-in-out infinite}
+.cart-badge{animation:badgePop 0.28s cubic-bezier(.34,1.56,.64,1) both}
+.nav-icon-active{animation:navPop 0.22s cubic-bezier(.34,1.56,.64,1) both}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="bill-print"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef, createContext, useContext } = React;
+
+// ─── Supabase config ──────────────────────────────────────────────────────────
+const CFG_KEY = 'ne_supabase_cfg';
+const getCfg  = () => { try{return JSON.parse(localStorage.getItem(CFG_KEY)||'null');}catch{return null;} };
+const saveCfg = (u,k) => localStorage.setItem(CFG_KEY,JSON.stringify({url:u,key:k}));
+const clearCfg= () => localStorage.removeItem(CFG_KEY);
+let _sb = null;
+const initSupabase = (u,k) => { _sb = window.supabase.createClient(u,k); return _sb; };
+
+// ─── DB layer ─────────────────────────────────────────────────────────────────
+const DB = {
+  getAll: async s => { const {data,error}=await _sb.from(s).select('id,data').order('id'); if(error)throw error; return (data||[]).map(r=>({...r.data,id:r.id})); },
+  put:    async (s,item) => { const {error}=await _sb.from(s).upsert({id:item.id,data:item},{onConflict:'id'}); if(error)throw error; },
+  del:    async (s,id)   => { const {error}=await _sb.from(s).delete().eq('id',id); if(error)throw error; },
+  seed:   async (s,items)=> { const {count,error}=await _sb.from(s).select('id',{count:'exact',head:true}); if(!error&&count===0) for(const i of items) await DB.put(s,i); },
+};
+
+// ─── Seeds ────────────────────────────────────────────────────────────────────
+const SEED_USERS     = [{id:1,name:"Admin",username:"admin",password:"admin123",role:"admin",email:"",active:true,avatar:"A",createdAt:new Date().toISOString().split('T')[0]}];
+const SEED_PRODUCTS  = [];
+const SEED_SALES     = [];
+const SEED_CHEQUES   = [];
+const SEED_COMPANIES = [];
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SUPPLIER CATALOG  (Kevilton · ACL · Kelani · Green Electric)
+// ═══════════════════════════════════════════════════════════════════════
+// [id, supplier, category, name, unit, costPrice]
+const _SC = [
+// ─── KEVILTON — White Series Switches ────────────────────────────────
+['kv-w01','Kevilton','Switches','1 Gang 1 Way Switch','pcs',365],
+['kv-w02','Kevilton','Switches','2 Gang 1 Way Switch','pcs',710],
+['kv-w03','Kevilton','Switches','3 Gang 1 Way Switch','pcs',1010],
+['kv-w04','Kevilton','Switches','4 Gang 1 Way Switch','pcs',1270],
+['kv-w05','Kevilton','Switches','5 Gang 1 Way Switch','pcs',1560],
+['kv-w06','Kevilton','Switches','1 Gang 2 Way Switch','pcs',625],
+['kv-w07','Kevilton','Switches','2 Gang 2 Way Switch','pcs',1150],
+['kv-w08','Kevilton','Switches','3 Gang 2 Way Switch','pcs',1700],
+['kv-w09','Kevilton','Switches','4 Gang 2 Way Switch','pcs',2245],
+['kv-w10','Kevilton','Switches','5 Gang 2 Way Switch','pcs',2620],
+['kv-w11','Kevilton','Switches','Blank Plate (White)','pcs',330],
+['kv-w12','Kevilton','Switches','20A Double Pole Switch w/Neon','pcs',2035],
+['kv-w13','Kevilton','Switches','Tumbler Switch','pcs',360],
+['kv-w14','Kevilton','Switches','1 Gang Intermediate Switch','pcs',4410],
+// ─── KEVILTON — White Sockets ────────────────────────────────────────
+['kv-s01','Kevilton','Sockets','6A Socket','pcs',1025],
+['kv-s02','Kevilton','Sockets','13A Socket','pcs',1045],
+['kv-s03','Kevilton','Sockets','13A Socket with Neon','pcs',1380],
+['kv-s04','Kevilton','Sockets','13A Twin Socket','pcs',2185],
+['kv-s05','Kevilton','Sockets','13A Twin Socket with Neon','pcs',2915],
+['kv-s06','Kevilton','Sockets','1A USB Charger Socket','pcs',2210],
+['kv-s07','Kevilton','Sockets','2.5A USB Charger Socket','pcs',4050],
+// ─── KEVILTON — White Controllers / Video / Bell ─────────────────────
+['kv-c01','Kevilton','Controllers','Light Dimmer (White)','pcs',2210],
+['kv-c02','Kevilton','Controllers','Fan Controller (White)','pcs',2170],
+['kv-c03','Kevilton','Controllers','5-Step Fan Controller (White)','pcs',2555],
+['kv-v01','Kevilton','Video & Voice','TV Socket','pcs',1620],
+['kv-v02','Kevilton','Video & Voice','Telephone Socket 4-Line','pcs',1620],
+['kv-v03','Kevilton','Video & Voice','Combined TV & Telephone Socket','pcs',2280],
+['kv-v04','Kevilton','Video & Voice','Satellite Antenna Socket','pcs',1490],
+['kv-v05','Kevilton','Video & Voice','Cat 6 Data Socket with Shutter','pcs',4525],
+['kv-v06','Kevilton','Video & Voice','Cat 6 Twin Data Socket','pcs',5005],
+['kv-b01','Kevilton','Bell','Bell Press (White)','pcs',910],
+['kv-b02','Kevilton','Bell','Weatherproof Bell Push with Indicator','pcs',1920],
+// ─── KEVILTON — Modular White ────────────────────────────────────────
+['kv-m01','Kevilton','Modular Switches','1 Gang 1 Way Switch (Modular White)','pcs',615],
+['kv-m02','Kevilton','Modular Switches','2 Gang 1 Way Switch (Modular White)','pcs',875],
+['kv-m03','Kevilton','Modular Switches','3 Gang 1 Way Switch (Modular White)','pcs',1125],
+['kv-m04','Kevilton','Modular Switches','4 Gang 1 Way Switch (Modular White)','pcs',1625],
+['kv-m05','Kevilton','Modular Switches','1 Gang 2 Way Switch (Modular White)','pcs',940],
+['kv-m06','Kevilton','Modular Switches','2 Gang 2 Way Switch (Modular White)','pcs',1375],
+['kv-m07','Kevilton','Modular Switches','3 Gang 2 Way Switch (Modular White)','pcs',1825],
+['kv-m08','Kevilton','Modular Switches','4 Gang 2 Way Switch (Modular White)','pcs',2275],
+['kv-m09','Kevilton','Modular Switches','Intermediate Switch (Modular)','pcs',1450],
+['kv-m10','Kevilton','Modular Switches','Key Card Switch (Modular White)','pcs',5800],
+['kv-m11','Kevilton','Modular Switches','DND 2 Gang 2 Way Switch (Modular)','pcs',3800],
+['kv-m12','Kevilton','Modular Switches','20A Double Pole w/Neon (Modular)','pcs',3315],
+['kv-ms1','Kevilton','Modular Switches','13A Socket w/Neon (Modular White)','pcs',2190],
+['kv-ms2','Kevilton','Modular Switches','13A Socket (Modular White)','pcs',1715],
+['kv-ms3','Kevilton','Modular Switches','13A Socket with 2 USB (Modular)','pcs',5250],
+['kv-ms4','Kevilton','Modular Switches','13A Twin Socket w/Neon (Modular)','pcs',3625],
+['kv-mc1','Kevilton','Modular Switches','Light Dimmer (Modular White)','pcs',3290],
+['kv-mc2','Kevilton','Modular Switches','Fan Controller (Modular White)','pcs',3290],
+['kv-mc3','Kevilton','Modular Switches','Step Fan Controller (Modular White)','pcs',3440],
+['kv-mv1','Kevilton','Modular Switches','TV Socket (Modular White)','pcs',2375],
+['kv-mv2','Kevilton','Modular Switches','Telephone Socket (Modular White)','pcs',2375],
+['kv-mb1','Kevilton','Modular Switches','Bell Press (Modular White)','pcs',1225],
+['kv-mf1','Kevilton','Modular Switches','Frame for Switches & Sockets (Modular)','pcs',150],
+['kv-mf2','Kevilton','Modular Switches','Blank Plate (Modular White)','pcs',500],
+// ─── KEVILTON — Nature Series ────────────────────────────────────────
+['kv-n01','Kevilton','Nature Series','1 Gang Switch (Kumbuk/Teak/Mahogany)','pcs',890],
+['kv-n02','Kevilton','Nature Series','2 Gang Switch (Kumbuk/Teak/Mahogany)','pcs',1265],
+['kv-n03','Kevilton','Nature Series','3 Gang Switch (Kumbuk/Teak/Mahogany)','pcs',1425],
+['kv-n04','Kevilton','Nature Series','4 Gang Switch (Kumbuk/Teak/Mahogany)','pcs',2055],
+['kv-n05','Kevilton','Nature Series','1 Gang 2 Way Switch (Kumbuk/Teak)','pcs',1250],
+['kv-n06','Kevilton','Nature Series','2 Gang 2 Way Switch (Kumbuk/Teak)','pcs',1740],
+['kv-n07','Kevilton','Nature Series','3 Gang 2 Way Switch (Kumbuk/Teak)','pcs',2305],
+['kv-n08','Kevilton','Nature Series','4 Gang 2 Way Switch (Kumbuk/Teak)','pcs',2875],
+['kv-n09','Kevilton','Nature Series','13A Socket w/Neon (Kumbuk/Teak)','pcs',2770],
+['kv-n10','Kevilton','Nature Series','13A Socket (Kumbuk/Teak)','pcs',2270],
+['kv-n11','Kevilton','Nature Series','Cat 6 Data Socket (Kumbuk/Teak)','pcs',5750],
+['kv-n12','Kevilton','Nature Series','Dimmer (Kumbuk/Teak)','pcs',4165],
+['kv-n13','Kevilton','Nature Series','Fan Controller (Kumbuk/Teak)','pcs',4165],
+['kv-n14','Kevilton','Nature Series','Blank Plate (Kumbuk/Teak)','pcs',815],
+['kv-n15','Kevilton','Nature Series','Bell Press (Kumbuk/Teak)','pcs',1550],
+['kv-n16','Kevilton','Nature Series','TV Socket (Kumbuk/Teak)','pcs',3005],
+['kv-n17','Kevilton','Nature Series','Telephone Socket (Kumbuk/Teak)','pcs',3005],
+// ─── KEVILTON — Circuit Protection ──────────────────────────────────
+['kv-p01','Kevilton','Circuit Protection','MCB K10C 6A 1P (10kA)','pcs',1125],
+['kv-p02','Kevilton','Circuit Protection','MCB K10C 10A 1P (10kA)','pcs',1125],
+['kv-p03','Kevilton','Circuit Protection','MCB K10C 16A 1P (10kA)','pcs',1125],
+['kv-p04','Kevilton','Circuit Protection','MCB K10C 20A 1P (10kA)','pcs',1125],
+['kv-p05','Kevilton','Circuit Protection','MCB K10C 32A 1P (10kA)','pcs',1125],
+['kv-p06','Kevilton','Circuit Protection','MCB K10C 40A 1P (10kA)','pcs',1440],
+['kv-p07','Kevilton','Circuit Protection','MCB K10C 63A 1P (10kA)','pcs',1440],
+['kv-p08','Kevilton','Circuit Protection','MCB K10C 6A 2P (10kA)','pcs',2590],
+['kv-p09','Kevilton','Circuit Protection','MCB K10C 10A 2P (10kA)','pcs',2590],
+['kv-p10','Kevilton','Circuit Protection','MCB K10C 16A 2P (10kA)','pcs',2590],
+['kv-p11','Kevilton','Circuit Protection','MCB K10C 20A 2P (10kA)','pcs',2590],
+['kv-p12','Kevilton','Circuit Protection','MCB K10C 32A 2P (10kA)','pcs',2590],
+['kv-p13','Kevilton','Circuit Protection','MCB K10C 40A 2P (10kA)','pcs',2790],
+['kv-p14','Kevilton','Circuit Protection','MCB K10C 63A 2P (10kA)','pcs',2790],
+['kv-p15','Kevilton','Circuit Protection','MCB K10C 6-32A 3P (10kA)','pcs',4200],
+['kv-p16','Kevilton','Circuit Protection','MCB K10C 40-63A 3P (10kA)','pcs',4800],
+['kv-p17','Kevilton','Circuit Protection','MCB K10C 6-32A 4P (10kA)','pcs',6050],
+['kv-p18','Kevilton','Circuit Protection','MCB K10C 40-63A 4P (10kA)','pcs',6625],
+['kv-p19','Kevilton','Circuit Protection','SAFETAA MCB 6A-32A 1P (6kA)','pcs',650],
+['kv-p20','Kevilton','Circuit Protection','SAFETAA RCCB 40A 30mA 2P','pcs',4795],
+['kv-p21','Kevilton','Circuit Protection','SAFETAA Isolator 40A 2P','pcs',1355],
+['kv-p22','Kevilton','Circuit Protection','HEXA MCB 6A-32A 1P (6kA)','pcs',810],
+['kv-p23','Kevilton','Circuit Protection','HEXA RCCB 40A 30mA 2P','pcs',6335],
+['kv-p24','Kevilton','Circuit Protection','HEXA Isolator 40A 2P','pcs',1895],
+['kv-p25','Kevilton','Circuit Protection','RCCB K10R 40A 30mA 2P','pcs',8440],
+['kv-p26','Kevilton','Circuit Protection','RCCB K10R 40A 100mA 2P','pcs',10590],
+['kv-p27','Kevilton','Circuit Protection','RCCB K10R 63A 30mA 2P','pcs',10490],
+['kv-p28','Kevilton','Circuit Protection','RCCB K10R 63A 100mA 2P','pcs',10775],
+['kv-p29','Kevilton','Circuit Protection','Isolator K10I 40A 2P','pcs',3125],
+['kv-p30','Kevilton','Circuit Protection','Isolator K10I 40A 3P','pcs',5200],
+['kv-p31','Kevilton','Circuit Protection','Isolator K10I 63A 2P','pcs',3975],
+['kv-p32','Kevilton','Circuit Protection','Isolator K10I 63A 3P','pcs',5575],
+['kv-p33','Kevilton','Circuit Protection','Changeover Switch 40A 2P','pcs',3860],
+['kv-p34','Kevilton','Circuit Protection','Changeover Switch 40A 4P','pcs',9545],
+['kv-p35','Kevilton','Circuit Protection','Changeover Switch 63A 2P','pcs',6840],
+['kv-p36','Kevilton','Circuit Protection','Changeover Switch 63A 4P','pcs',11250],
+['kv-p37','Kevilton','Circuit Protection','MCCB 30-100A 3P','pcs',13055],
+['kv-p38','Kevilton','Circuit Protection','MCCB 125-160A 3P','pcs',22520],
+['kv-p39','Kevilton','Circuit Protection','MCCB 30-100A 4P','pcs',17845],
+['kv-p40','Kevilton','Circuit Protection','MCCB 125A 4P','pcs',21430],
+['kv-p41','Kevilton','Circuit Protection','MCCB 160A 4P','pcs',24875],
+// ─── KEVILTON — Conduit & Fittings ──────────────────────────────────
+['kv-co1','Kevilton','Conduit & Fittings','Conduit Pipe 16mm (4m)','pcs',280],
+['kv-co2','Kevilton','Conduit & Fittings','Conduit Pipe 20mm (4m)','pcs',370],
+['kv-co3','Kevilton','Conduit & Fittings','Conduit Pipe 25mm (4m)','pcs',480],
+['kv-co4','Kevilton','Conduit & Fittings','Conduit Pipe 30mm (4m)','pcs',1240],
+['kv-co5','Kevilton','Conduit & Fittings','Conduit Pipe 40mm (4m)','pcs',1780],
+['kv-co6','Kevilton','Conduit & Fittings','Conduit Pipe 50mm (4m)','pcs',2040],
+['kv-co7','Kevilton','Conduit & Fittings','Conduit Socket 16mm','pcs',25],
+['kv-co8','Kevilton','Conduit & Fittings','Conduit Socket 20mm','pcs',26],
+['kv-co9','Kevilton','Conduit & Fittings','Conduit Socket 25mm','pcs',33],
+['kv-c10','Kevilton','Conduit & Fittings','Conduit Saddle 16mm','pcs',26],
+['kv-c11','Kevilton','Conduit & Fittings','Conduit Saddle 20mm','pcs',29],
+['kv-c12','Kevilton','Conduit & Fittings','Conduit Saddle 25mm','pcs',29],
+['kv-c13','Kevilton','Conduit & Fittings','Conduit Bend 16mm','pcs',52],
+['kv-c14','Kevilton','Conduit & Fittings','Conduit Bend 20mm','pcs',67],
+['kv-c15','Kevilton','Conduit & Fittings','Conduit Bend 25mm','pcs',78],
+['kv-c16','Kevilton','Conduit & Fittings','Corrugated Conduit 18mm (15m)','roll',2100],
+['kv-c17','Kevilton','Conduit & Fittings','Corrugated Conduit 20mm (15m)','roll',3225],
+['kv-c18','Kevilton','Conduit & Fittings','Corrugated Conduit 25mm (15m)','roll',3625],
+['kv-c19','Kevilton','Conduit & Fittings','Corrugated Conduit 32mm (15m)','roll',5775],
+['kv-t01','Kevilton','Cable Trunking','Cable Trunking 16x12.5mm (3m)','pcs',420],
+['kv-t02','Kevilton','Cable Trunking','Cable Trunking 20x12.5mm (3m)','pcs',510],
+['kv-t03','Kevilton','Cable Trunking','Cable Trunking 25x16mm (3m)','pcs',615],
+['kv-t04','Kevilton','Cable Trunking','Cable Trunking 32x16mm (3m)','pcs',825],
+['kv-t05','Kevilton','Cable Trunking','Cable Trunking 40x16mm (3m)','pcs',1095],
+['kv-t06','Kevilton','Cable Trunking','Cable Trunking 40x25mm (3m)','pcs',1200],
+['kv-t07','Kevilton','Cable Trunking','Cable Trunking 50x25mm (3m)','pcs',1485],
+['kv-t08','Kevilton','Cable Trunking','Cable Trunking 50x50mm (3m)','pcs',2520],
+['kv-t09','Kevilton','Cable Trunking','Cable Trunking 75x50mm (3m)','pcs',3300],
+['kv-t10','Kevilton','Cable Trunking','Cable Trunking 100x50mm (3m)','pcs',4395],
+['kv-t11','Kevilton','Cable Trunking','Cable Trunking 100x75mm (3m)','pcs',4740],
+['kv-t12','Kevilton','Cable Trunking','Cable Trunking 100x100mm (3m)','pcs',6480],
+// ─── KEVILTON — Accessories ─────────────────────────────────────────
+['kv-a01','Kevilton','Accessories','13A Fused Plug Top','pcs',505],
+['kv-a02','Kevilton','Accessories','13A Fused Plug Top with Neon','pcs',675],
+['kv-a03','Kevilton','Accessories','Single Sunk Box','pcs',155],
+['kv-a04','Kevilton','Accessories','Twin Sunk Box','pcs',315],
+['kv-a05','Kevilton','Accessories','Deep Sunk Box (2 Lock Inserts)','pcs',205],
+['kv-a06','Kevilton','Accessories','3-Way Sunk Box','pcs',510],
+['kv-a07','Kevilton','Accessories','4-Way Sunk Box','pcs',655],
+['kv-a08','Kevilton','Accessories','B22 Pendant Holder','pcs',225],
+['kv-a09','Kevilton','Accessories','B22 Angle Batten Holder','pcs',350],
+['kv-a10','Kevilton','Accessories','B22 Straight Batten Holder','pcs',350],
+['kv-a11','Kevilton','Accessories','E27 Pendant Holder','pcs',450],
+['kv-a12','Kevilton','Accessories','E27 Angle Batten Holder','pcs',550],
+['kv-a13','Kevilton','Accessories','E27 Straight Batten Holder','pcs',550],
+['kv-a14','Kevilton','Accessories','Ceiling Rose 2 Terminal','pcs',355],
+['kv-a15','Kevilton','Accessories','Ceiling Rose 3 Terminal','pcs',390],
+['kv-a16','Kevilton','Accessories','4-Way Junction Box','pcs',120],
+['kv-a17','Kevilton','Accessories','Insulation Tape (Red/Blue/Black…)','pcs',160],
+['kv-a18','Kevilton','Accessories','Earth Rod 12mm x 1500mm','pcs',3500],
+['kv-a19','Kevilton','Accessories','Earth Rod Clamp (Brass)','pcs',800],
+['kv-a20','Kevilton','Accessories','13A 4-Way Trailing Socket 3m','pcs',5250],
+['kv-a21','Kevilton','Accessories','13A 4-Way Trailing Socket 5m','pcs',5950],
+['kv-a22','Kevilton','Accessories','13A 4-Way Trailing Socket+USB 3m','pcs',8200],
+['kv-a23','Kevilton','Accessories','Single Pin Busbar','pcs',4540],
+['kv-a24','Kevilton','Accessories','Electric Bell 230V','pcs',1090],
+// ─── KEVILTON — Lighting ─────────────────────────────────────────────
+['kv-l01','Kevilton','Lighting','LED Bulb 3.5W B22/E27','pcs',600],
+['kv-l02','Kevilton','Lighting','LED Bulb 5W B22/E27','pcs',750],
+['kv-l03','Kevilton','Lighting','LED Bulb 7W B22/E27','pcs',880],
+['kv-l04','Kevilton','Lighting','LED Bulb 9W B22/E27','pcs',950],
+['kv-l05','Kevilton','Lighting','LED Bulb 12W B22/E27','pcs',1100],
+['kv-l06','Kevilton','Lighting','LED High Wattage Bulb 30W','pcs',3900],
+['kv-l07','Kevilton','Lighting','LED High Wattage Bulb 40W','pcs',4985],
+['kv-l08','Kevilton','Lighting','LED High Wattage Bulb 50W','pcs',6100],
+['kv-l09','Kevilton','Lighting','LED Ceiling Sunk 4W','pcs',1215],
+['kv-l10','Kevilton','Lighting','LED Ceiling Sunk 6W','pcs',2005],
+['kv-l11','Kevilton','Lighting','LED Ceiling Sunk 9W','pcs',2330],
+['kv-l12','Kevilton','Lighting','LED Ceiling Sunk 12W','pcs',3085],
+['kv-l13','Kevilton','Lighting','LED Ceiling Sunk 18W','pcs',3765],
+['kv-l14','Kevilton','Lighting','LED Ceiling Sunk 24W','pcs',5290],
+['kv-l15','Kevilton','Lighting','LED Ceiling Surface 6W','pcs',2520],
+['kv-l16','Kevilton','Lighting','LED Ceiling Surface 12W','pcs',3715],
+['kv-l17','Kevilton','Lighting','LED Ceiling Surface 18W','pcs',4575],
+['kv-l18','Kevilton','Lighting','LED Tube Light 9W 2ft (T8)','pcs',1765],
+['kv-l19','Kevilton','Lighting','LED Batten Light 9W 2ft (T5)','pcs',2280],
+['kv-l20','Kevilton','Lighting','LED Tube Light 18W 4ft (T8)','pcs',2380],
+['kv-l21','Kevilton','Lighting','LED Batten Light 18W 4ft (T5)','pcs',3565],
+['kv-l22','Kevilton','Lighting','Safetaa LED Bulb 5W B22/E27','pcs',700],
+['kv-l23','Kevilton','Lighting','Safetaa LED Bulb 9W B22/E27','pcs',800],
+['kv-l24','Kevilton','Lighting','Safetaa LED Bulb 12W B22/E27','pcs',950],
+['kv-l25','Kevilton','Lighting','Safetaa LED Bulb 15W B22/E27','pcs',1350],
+['kv-l26','Kevilton','Lighting','Safetaa Surface Square 12W','pcs',2250],
+['kv-l27','Kevilton','Lighting','Safetaa Surface Square 18W','pcs',2500],
+['kv-l28','Kevilton','Lighting','Safetaa Surface Round 12W','pcs',2250],
+['kv-l29','Kevilton','Lighting','Safetaa Surface Round 18W','pcs',2500],
+// ─── KEVILTON — Fans & Battery ───────────────────────────────────────
+['kv-f01','Kevilton','Fans','Airmax Ceiling Fan (White/Ivory/Brown/Black)','pcs',16000],
+['kv-bt1','Kevilton','Batteries','Solar Battery 75Ah 12V Tubular','pcs',73000],
+['kv-bt2','Kevilton','Batteries','Solar Battery 100Ah 12V Tubular','pcs',110000],
+['kv-bt3','Kevilton','Batteries','Solar Battery 150Ah 12V Tubular','pcs',140000],
+['kv-bt4','Kevilton','Batteries','Solar Battery 200Ah 12V Tubular','pcs',180000],
+// ─── ACL CABLES — Building Wires (FireGuard) ────────────────────────
+['ac-w01','ACL Cables','Wires & Cables','ACL Building Wire 1mm² (100m)','roll',7250],
+['ac-w02','ACL Cables','Wires & Cables','ACL Building Wire 1.5mm² Single (100m)','roll',14490],
+['ac-w03','ACL Cables','Wires & Cables','ACL Building Wire 1.5mm² Twin (100m)','roll',28600],
+['ac-w04','ACL Cables','Wires & Cables','ACL Building Wire 2.5mm² Single (100m)','roll',22250],
+['ac-w05','ACL Cables','Wires & Cables','ACL Building Wire 2.5mm² Twin (100m)','roll',44950],
+['ac-w06','ACL Cables','Wires & Cables','ACL Building Wire 4mm² Single (100m)','roll',33720],
+['ac-w07','ACL Cables','Wires & Cables','ACL Building Wire 4mm² Twin (100m)','roll',69490],
+['ac-w08','ACL Cables','Wires & Cables','ACL Building Wire 6mm² Single (100m)','roll',51240],
+['ac-w09','ACL Cables','Wires & Cables','ACL Building Wire 6mm² Twin (100m)','roll',103520],
+['ac-w10','ACL Cables','Wires & Cables','ACL Building Wire 10mm² Single (100m)','roll',86100],
+['ac-w11','ACL Cables','Wires & Cables','ACL Building Wire 10mm² Twin (100m)','roll',174560],
+['ac-w12','ACL Cables','Wires & Cables','ACL Building Wire 16mm² Single (100m)','roll',133960],
+['ac-w13','ACL Cables','Wires & Cables','ACL Building Wire 16mm² Twin (100m)','roll',270070],
+['ac-w14','ACL Cables','Wires & Cables','ACL Super PVC Wire 1mm² (100m)','roll',6250],
+['ac-w15','ACL Cables','Wires & Cables','ACL Super PVC Wire 1.5mm² Single (100m)','roll',13770],
+['ac-w16','ACL Cables','Wires & Cables','ACL Super PVC Wire 2.5mm² Single (100m)','roll',21140],
+['ac-w17','ACL Cables','Wires & Cables','ACL Super PVC Wire 4mm² Single (100m)','roll',32040],
+['ac-w18','ACL Cables','Wires & Cables','ACL Super PVC Wire 6mm² Single (100m)','roll',48680],
+['ac-w19','ACL Cables','Wires & Cables','ACL Super PVC Wire 10mm² Single (100m)','roll',81800],
+['ac-w20','ACL Cables','Wires & Cables','ACL Super PVC Wire 16mm² Single (100m)','roll',127270],
+['ac-w21','ACL Cables','Wires & Cables','ACL Earth Cable 1.5mm² (100m)','roll',12550],
+['ac-w22','ACL Cables','Wires & Cables','ACL Earth Cable 2.5mm² (100m)','roll',19070],
+['ac-w23','ACL Cables','Wires & Cables','ACL Earth Cable 4mm² (100m)','roll',31730],
+['ac-w24','ACL Cables','Wires & Cables','ACL Earth Cable 6mm² (100m)','roll',47870],
+['ac-w25','ACL Cables','Wires & Cables','ACL Earth Cable 10mm² (100m)','roll',81700],
+// ─── ACL CABLES — Elegance Switches White ───────────────────────────
+['ac-s01','ACL Cables','Switches','ACL Elegance 1 Gang 1 Way (White)','pcs',690],
+['ac-s02','ACL Cables','Switches','ACL Elegance 2 Gang 1 Way (White)','pcs',965],
+['ac-s03','ACL Cables','Switches','ACL Elegance 3 Gang 1 Way (White)','pcs',1260],
+['ac-s04','ACL Cables','Switches','ACL Elegance 4 Gang 1 Way (White)','pcs',1870],
+['ac-s05','ACL Cables','Switches','ACL Elegance 1 Gang 2 Way (White)','pcs',1035],
+['ac-s06','ACL Cables','Switches','ACL Elegance 2 Gang 2 Way (White)','pcs',1510],
+['ac-s07','ACL Cables','Switches','ACL Elegance 3 Gang 2 Way (White)','pcs',2020],
+['ac-s08','ACL Cables','Switches','ACL Elegance 4 Gang 2 Way (White)','pcs',2490],
+['ac-s09','ACL Cables','Switches','ACL Elegance 13A Socket (White)','pcs',1910],
+['ac-s10','ACL Cables','Switches','ACL Elegance 13A Socket w/Neon (White)','pcs',2325],
+['ac-s11','ACL Cables','Switches','ACL Elegance Light Dimmer (White)','pcs',3600],
+['ac-s12','ACL Cables','Switches','ACL Elegance 5-Step Fan Controller (White)','pcs',3970],
+['ac-s13','ACL Cables','Switches','ACL Elegance TV Socket (White)','pcs',3190],
+['ac-s14','ACL Cables','Switches','ACL Elegance Telephone Socket (White)','pcs',3095],
+['ac-s15','ACL Cables','Switches','ACL Elegance Data Socket (White)','pcs',4995],
+['ac-s16','ACL Cables','Switches','ACL Elegance Bell Press (White)','pcs',1340],
+['ac-s17','ACL Cables','Switches','ACL Elegance Blank Plate (White)','pcs',740],
+['ac-s18','ACL Cables','Switches','ACL Elegance 20A DP Switch (White)','pcs',3735],
+// ─── ACL CABLES — Elegance Colour ───────────────────────────────────
+['ac-c01','ACL Cables','Switches','ACL Elegance 1 Gang 1 Way (Black/Bronze/Grey)','pcs',950],
+['ac-c02','ACL Cables','Switches','ACL Elegance 2 Gang 1 Way (Black/Bronze/Grey)','pcs',1225],
+['ac-c03','ACL Cables','Switches','ACL Elegance 3 Gang 1 Way (Black/Bronze/Grey)','pcs',1480],
+['ac-c04','ACL Cables','Switches','ACL Elegance 4 Gang 1 Way (Black/Bronze/Grey)','pcs',2040],
+['ac-c05','ACL Cables','Switches','ACL Elegance 1 Gang 2 Way (Black/Bronze/Grey)','pcs',1340],
+['ac-c06','ACL Cables','Switches','ACL Elegance 2 Gang 2 Way (Black/Bronze/Grey)','pcs',1795],
+['ac-c07','ACL Cables','Switches','ACL Elegance 13A Socket (Black/Bronze/Grey)','pcs',2270],
+['ac-c08','ACL Cables','Switches','ACL Elegance 13A Socket w/Neon (Colour)','pcs',2630],
+['ac-c09','ACL Cables','Switches','ACL Elegance Light Dimmer (Colour)','pcs',3905],
+['ac-c10','ACL Cables','Switches','ACL Elegance Fan Controller (Colour)','pcs',4160],
+['ac-c11','ACL Cables','Switches','ACL Elegance TV Socket (Colour)','pcs',4035],
+['ac-c12','ACL Cables','Switches','ACL Elegance Telephone Socket (Colour)','pcs',4160],
+['ac-c13','ACL Cables','Switches','ACL Elegance Data Socket (Colour)','pcs',5635],
+// ─── ACL CABLES — Standard Switches ─────────────────────────────────
+['ac-d01','ACL Cables','Switches','ACL 1 Gang 1 Way Switch','pcs',405],
+['ac-d02','ACL Cables','Switches','ACL 2 Gang 1 Way Switch','pcs',760],
+['ac-d03','ACL Cables','Switches','ACL 3 Gang 1 Way Switch','pcs',1090],
+['ac-d04','ACL Cables','Switches','ACL 4 Gang 1 Way Switch','pcs',1365],
+['ac-d05','ACL Cables','Switches','ACL 5 Gang 1 Way Switch','pcs',1670],
+['ac-d06','ACL Cables','Switches','ACL 1 Gang 2 Way Switch','pcs',665],
+['ac-d07','ACL Cables','Switches','ACL 2 Gang 2 Way Switch','pcs',1225],
+['ac-d08','ACL Cables','Switches','ACL 3 Gang 2 Way Switch','pcs',1805],
+['ac-d09','ACL Cables','Switches','ACL 13A Switched Socket','pcs',1150],
+['ac-d10','ACL Cables','Switches','ACL 13A Socket with Neon','pcs',1470],
+['ac-d11','ACL Cables','Switches','ACL 13A Twin Switched Socket','pcs',2090],
+['ac-d12','ACL Cables','Switches','ACL Fan Speed Controller','pcs',1625],
+['ac-d13','ACL Cables','Switches','ACL Light Dimmer','pcs',2345],
+['ac-d14','ACL Cables','Switches','ACL 5-Step Fan Controller','pcs',2725],
+['ac-d15','ACL Cables','Switches','ACL Bell Press (1 Gang)','pcs',985],
+['ac-d16','ACL Cables','Switches','ACL TV Socket','pcs',1745],
+['ac-d17','ACL Cables','Switches','ACL Telephone Socket','pcs',1745],
+['ac-d18','ACL Cables','Switches','ACL 20A Double Pole Switch','pcs',2315],
+['ac-d19','ACL Cables','Switches','ACL USB Charger Socket','pcs',4685],
+['ac-d20','ACL Cables','Switches','ACL Blank Plate','pcs',360],
+['ac-d21','ACL Cables','Switches','ACL Data Socket','pcs',4020],
+['ac-d22','ACL Cables','Accessories','ACL Lamp Holder','pcs',285],
+['ac-d23','ACL Cables','Accessories','ACL Ceiling Rose','pcs',370],
+['ac-d24','ACL Cables','Accessories','ACL 13A Plug Top','pcs',600],
+['ac-d25','ACL Cables','Accessories','ACL Mounting Box Modular','pcs',140],
+['ac-d26','ACL Cables','Fans','ACL Ceiling Fan (Aluminium Blade)','pcs',16750],
+// ─── ACL CABLES — Circuit Protection ────────────────────────────────
+['ac-p01','ACL Cables','Circuit Protection','ACL Venus MCB 6A-32A 1P','pcs',995],
+['ac-p02','ACL Cables','Circuit Protection','ACL Venus MCB 6A-32A 2P','pcs',2275],
+['ac-p03','ACL Cables','Circuit Protection','ACL Venus MCB 40A-63A 2P','pcs',2475],
+['ac-p04','ACL Cables','Circuit Protection','ACL Venus MCB 6A-32A 3P','pcs',3695],
+['ac-p05','ACL Cables','Circuit Protection','ACL Venus MCB 40A-63A 3P','pcs',4225],
+['ac-p06','ACL Cables','Circuit Protection','ACL Venus MCB 6A-32A 4P','pcs',5295],
+['ac-p07','ACL Cables','Circuit Protection','ACL Venus MCB 40A-63A 4P','pcs',5825],
+['ac-p08','ACL Cables','Circuit Protection','ACL Venus RCD 40A 30mA 2P','pcs',7475],
+['ac-p09','ACL Cables','Circuit Protection','ACL Venus Isolator 40A 2P','pcs',2580],
+['ac-p10','ACL Cables','Circuit Protection','ACL Venus 6kA RCD 40A 4P','pcs',12295],
+['ac-p11','ACL Cables','Circuit Protection','ACL Venus 6kA RCD 63A 4P','pcs',13555],
+['ac-p12','ACL Cables','Circuit Protection','ACL Venus 6kA Isolator 40A 4P','pcs',5145],
+['ac-p13','ACL Cables','Circuit Protection','ACL Mercury MCB 6A-32A 1P','pcs',700],
+['ac-p14','ACL Cables','Circuit Protection','ACL Mercury Isolator 40A 2P','pcs',1750],
+['ac-p15','ACL Cables','Circuit Protection','ACL Mercury RCD 40A 30mA 2P','pcs',5900],
+// ─── KELANI CABLES — Building Wires ─────────────────────────────────
+['kl-w01','Kelani','Wires & Cables','Kelani Building Wire 1mm² (100m)','roll',7250],
+['kl-w02','Kelani','Wires & Cables','Kelani Building Wire 1.5mm² Single (100m)','roll',14490],
+['kl-w03','Kelani','Wires & Cables','Kelani Building Wire 1.5mm² Twin (100m)','roll',28600],
+['kl-w04','Kelani','Wires & Cables','Kelani Building Wire 2.5mm² Single (100m)','roll',22250],
+['kl-w05','Kelani','Wires & Cables','Kelani Building Wire 2.5mm² Twin (100m)','roll',44950],
+['kl-w06','Kelani','Wires & Cables','Kelani Building Wire 4mm² Single (100m)','roll',33720],
+['kl-w07','Kelani','Wires & Cables','Kelani Building Wire 4mm² Twin (100m)','roll',69490],
+['kl-w08','Kelani','Wires & Cables','Kelani Building Wire 6mm² Single (100m)','roll',51240],
+['kl-w09','Kelani','Wires & Cables','Kelani Building Wire 6mm² Twin (100m)','roll',103520],
+['kl-w10','Kelani','Wires & Cables','Kelani Building Wire 10mm² Single (100m)','roll',86100],
+['kl-w11','Kelani','Wires & Cables','Kelani Building Wire 10mm² Twin (100m)','roll',174560],
+['kl-w12','Kelani','Wires & Cables','Kelani Building Wire 16mm² Single (100m)','roll',133960],
+['kl-w13','Kelani','Wires & Cables','Kelani Building Wire 16mm² Twin (100m)','roll',270070],
+['kl-w14','Kelani','Wires & Cables','Kelani Building Wire 25mm² Single (100m)','roll',301190],
+['kl-w15','Kelani','Wires & Cables','Kelani Earth Wire 1.5mm² (100m)','roll',12550],
+['kl-w16','Kelani','Wires & Cables','Kelani Earth Wire 2.5mm² (100m)','roll',19470],
+// ─── GREEN ELECTRIC — LED Bulbs ─────────────────────────────────────
+['ge-b01','Green Electric','Lighting','Eco Smart Bulb B22 (7W-14W range)','pcs',500],
+['ge-b02','Green Electric','Lighting','Emergency Bulb','pcs',2250],
+['ge-b03','Green Electric','Lighting','Green Intelligent Bulb (7W-9W)','pcs',1650],
+['ge-b04','Green Electric','Lighting','Highpower Bulb B22 (20W-50W)','pcs',1950],
+['ge-b05','Green Electric','Lighting','LED Candle Bulb B22 (3W-10W)','pcs',690],
+['ge-b06','Green Electric','Lighting','LED Tube Bulb B22 (7W-15W)','pcs',890],
+['ge-b07','Green Electric','Lighting','Mini T Bulb E14','pcs',650],
+// ─── GREEN ELECTRIC — Panel Lights ──────────────────────────────────
+['ge-p01','Green Electric','Lighting','Green Eco Smart Panel Recessed (6W-18W)','pcs',1350],
+['ge-p02','Green Electric','Lighting','Green Eco Surfaced Panel Light (6W-18W)','pcs',1625],
+['ge-p03','Green Electric','Lighting','Green Flat Panel 40W (600x600)','pcs',9900],
+['ge-p04','Green Electric','Lighting','Green Standard Recessed Panel (6W-24W)','pcs',1725],
+['ge-p05','Green Electric','Lighting','Green Standard Surface Panel (6W-24W)','pcs',2200],
+// ─── GREEN ELECTRIC — Flood Lights ──────────────────────────────────
+['ge-f01','Green Electric','Lighting','Green Eco Flood Light (10W-100W)','pcs',2990],
+['ge-f02','Green Electric','Lighting','Green Standard Flood Light IP66 (10W-200W)','pcs',2990],
+['ge-f03','Green Electric','Lighting','Green Smart Flood Light (20W-100W)','pcs',2200],
+['ge-f04','Green Electric','Lighting','Sensor Flood Light (30W-50W)','pcs',7250],
+['ge-f05','Green Electric','Lighting','Solar LED Flood Light (30W-100W)','pcs',11500],
+['ge-f06','Green Electric','Lighting','Standard Flood Light RGB (20W-50W)','pcs',5750],
+// ─── GREEN ELECTRIC — Street Lights ─────────────────────────────────
+['ge-sl1','Green Electric','Lighting','Green Smart Street Light (50W-150W)','pcs',11500],
+['ge-sl2','Green Electric','Lighting','Solar LED Street Light (30W-200W)','pcs',7950],
+['ge-sl3','Green Electric','Lighting','Street Light (50W-200W)','pcs',9900],
+// ─── DIMO LUMIN — ECO LED Globe Bulbs ───────────────────────────────
+['dl-g01','Dimo Lumin','Lighting','Eco LED Globe Bulb 3W B22/E27 (6500K/3000K)','pcs',525],
+['dl-g02','Dimo Lumin','Lighting','Eco LED Globe Bulb 5W B22/E27 (6500K/3000K)','pcs',650],
+['dl-g03','Dimo Lumin','Lighting','Eco LED Globe Bulb 7W B22/E27 (6500K/3000K)','pcs',775],
+['dl-g04','Dimo Lumin','Lighting','Eco LED Globe Bulb 9W B22/E27 (6500K/3000K)','pcs',850],
+['dl-g05','Dimo Lumin','Lighting','Eco LED Globe Bulb 12W B22/E27 (6500K/3000K)','pcs',1000],
+['dl-g06','Dimo Lumin','Lighting','Eco LED Globe Bulb 15W B22/E27 (6500K)','pcs',1450],
+// ─── DIMO LUMIN — Eco High Power Bulbs ──────────────────────────────
+['dl-h01','Dimo Lumin','Lighting','Eco High Power LED Bulb 20W B22/E27','pcs',2750],
+['dl-h02','Dimo Lumin','Lighting','Eco High Power LED Bulb 30W B22/E27','pcs',3350],
+['dl-h03','Dimo Lumin','Lighting','Eco High Power LED Bulb 40W B22/E27','pcs',4250],
+['dl-h04','Dimo Lumin','Lighting','Eco High Power LED Bulb 50W B22/E27','pcs',5890],
+// ─── DIMO LUMIN — LED High Power ─────────────────────────────────────
+['dl-hp1','Dimo Lumin','Lighting','LED High Power Bulb 20W B22/E27','pcs',3670],
+['dl-hp2','Dimo Lumin','Lighting','LED High Power Bulb 30W B22/E27','pcs',4840],
+['dl-hp3','Dimo Lumin','Lighting','LED High Power Bulb 50W E27','pcs',7250],
+// ─── DIMO LUMIN — Eco Flood Lights ───────────────────────────────────
+['dl-f01','Dimo Lumin','Lighting','Eco Flood Light 10W (6500K/3000K)','pcs',3370],
+['dl-f02','Dimo Lumin','Lighting','Eco Flood Light 20W (6500K/3000K)','pcs',4550],
+['dl-f03','Dimo Lumin','Lighting','Eco Flood Light 50W (6500K/3000K)','pcs',8440],
+['dl-f04','Dimo Lumin','Lighting','Eco Flood Light 100W (6500K/3000K)','pcs',13500],
+['dl-f05','Dimo Lumin','Lighting','Eco Flood Light 150W (6500K/3000K)','pcs',23250],
+['dl-f06','Dimo Lumin','Lighting','Eco Flood Light 200W (6500K/3000K)','pcs',33520],
+// ─── DIMO LUMIN — Emergency Lights ───────────────────────────────────
+['dl-e01','Dimo Lumin','Lighting','Emergency Light 8W Pin Type B22 (6500K)','pcs',4220],
+['dl-e02','Dimo Lumin','Lighting','Emergency Light 8W Screw Type E27 (6500K)','pcs',4220],
+['dl-e03','Dimo Lumin','Lighting','Smart Charging Emergency Light 10W B22','pcs',3440],
+['dl-e04','Dimo Lumin','Lighting','Emergency Panel Light 12W Surface Square','pcs',5890],
+['dl-e05','Dimo Lumin','Lighting','Emergency Panel Light 12W Surface Round','pcs',5890],
+['dl-e06','Dimo Lumin','Lighting','Emergency Panel Light 12W Sunk Round','pcs',5190],
+// ─── DIMO LUMIN — Panel Lights (Surface) ─────────────────────────────
+['dl-ps1','Dimo Lumin','Lighting','Panel Light Surface 6W (6500K/3000K)','pcs',2100],
+['dl-ps2','Dimo Lumin','Lighting','Panel Light Surface 12W (6500K/3000K)','pcs',3000],
+['dl-ps3','Dimo Lumin','Lighting','Panel Light Surface 18W (6500K/3000K)','pcs',4000],
+['dl-ps4','Dimo Lumin','Lighting','Panel Light Surface 24W Square (6500K)','pcs',4490],
+// ─── DIMO LUMIN — Panel Lights (Sunk/Recessed) ───────────────────────
+['dl-pr1','Dimo Lumin','Lighting','Panel Light Sunk 6W (6500K/3000K)','pcs',1850],
+['dl-pr2','Dimo Lumin','Lighting','Panel Light Sunk 12W (6500K/3000K)','pcs',2800],
+['dl-pr3','Dimo Lumin','Lighting','Panel Light Sunk 18W (6500K/3000K)','pcs',3600],
+['dl-pr4','Dimo Lumin','Lighting','Panel Light Sunk 24W Square (6500K)','pcs',4490],
+['dl-pr5','Dimo Lumin','Lighting','Panel Light Sunk 40W Square 2×2 (6500K)','pcs',13700],
+// ─── DIMO LUMIN — LED Tube & Stick ───────────────────────────────────
+['dl-t01','Dimo Lumin','Lighting','LED Tube T8 9W 2ft (6500K) Double Side','pcs',1890],
+['dl-t02','Dimo Lumin','Lighting','LED Tube T8 18W 4ft (6500K) Double Side','pcs',3130],
+['dl-t03','Dimo Lumin','Lighting','LED Batten T5 18W 4ft (6500K)','pcs',4890],
+['dl-st1','Dimo Lumin','Lighting','LED Stick Lamp 9W E27','pcs',1410],
+['dl-st2','Dimo Lumin','Lighting','LED Stick Lamp 12W E27 (6500K/3000K)','pcs',1890],
+['dl-st3','Dimo Lumin','Lighting','LED Stick Lamp 14W E27','pcs',2320],
+// ─── DIMO LUMIN — Candle, Colour & Special ───────────────────────────
+['dl-cb1','Dimo Lumin','Lighting','LED Candle Bulb 3W E14/E27 (6500K/3000K)','pcs',800],
+['dl-cb2','Dimo Lumin','Lighting','LED Candle Bulb 5W E14/E27 (6500K/3000K)','pcs',900],
+['dl-co1','Dimo Lumin','Lighting','Colour LED Bulb 5W B22 (Green/Yellow/Red/Orange/White)','pcs',190],
+['dl-sb1','Dimo Lumin','Lighting','Sensor LED Bulb 8W E27 (6500K)','pcs',3050],
+['dl-sb2','Dimo Lumin','Lighting','Sensor Panel Light 18W Surface Round','pcs',4670],
+['dl-dp1','Dimo Lumin','Lighting','LED Dimmable Panel 18W Surface Round','pcs',4670],
+// ─── DIMO LUMIN — High Bay Lights ────────────────────────────────────
+['dl-hb1','Dimo Lumin','Lighting','High Bay Light 80W E40','pcs',19900],
+['dl-hb2','Dimo Lumin','Lighting','High Bay Lamp U1 100W 6500K','pcs',20650],
+['dl-hb3','Dimo Lumin','Lighting','High Bay Lamp U1 150W 6500K','pcs',32250],
+['dl-hb4','Dimo Lumin','Lighting','High Bay Lamp U1 200W 6500K','pcs',39500],
+// ─── DIMO LUMIN — Street Lights ──────────────────────────────────────
+['dl-sl1','Dimo Lumin','Lighting','Street Light 50W 6500K','pcs',16660],
+['dl-sl2','Dimo Lumin','Lighting','Street Light 100W 6500K','pcs',23550],
+['dl-sl3','Dimo Lumin','Lighting','Street Light 150W 6500K','pcs',33710],
+// ─── DIMO LUMIN — Switches & Sockets WHITE ───────────────────────────
+['dl-w01','Dimo Lumin','Switches','1 Gang 1 Way Switch White (ZCL811L)','pcs',690],
+['dl-w02','Dimo Lumin','Switches','1 Gang 2 Way Switch White (ZCL812L)','pcs',1040],
+['dl-w03','Dimo Lumin','Switches','2 Gang 1 Way Switch White (ZCL821L)','pcs',950],
+['dl-w04','Dimo Lumin','Switches','2 Gang 2 Way Switch White (ZCL822L)','pcs',1520],
+['dl-w05','Dimo Lumin','Switches','3 Gang 1 Way Switch White (ZCL831L)','pcs',1260],
+['dl-w06','Dimo Lumin','Switches','3 Gang 2 Way Switch White (ZCL832L)','pcs',2010],
+['dl-w07','Dimo Lumin','Switches','4 Gang 1 Way Switch White (ZCL841L)','pcs',1870],
+['dl-w08','Dimo Lumin','Switches','4 Gang 2 Way Switch White (ZCL842L)','pcs',2480],
+['dl-w09','Dimo Lumin','Switches','Bell Switch White (ZCL8BL)','pcs',1340],
+['dl-w10','Dimo Lumin','Switches','20A Double Pole Switch w/Indicator White','pcs',3700],
+['dl-w11','Dimo Lumin','Switches','Light Dimmer Switch White (ZCLD/500W/T)','pcs',2890],
+['dl-w12','Dimo Lumin','Switches','13A Socket w/Neon Indicator White','pcs',1910],
+['dl-w13','Dimo Lumin','Switches','Double USB Charger Socket White','pcs',4260],
+['dl-w14','Dimo Lumin','Switches','Fan Regulator White (ZCLS/82A)','pcs',3970],
+['dl-w15','Dimo Lumin','Switches','Single Tel Socket White (ZCLT01S)','pcs',2510],
+['dl-w16','Dimo Lumin','Switches','Single Data Socket White (ZCLT01CM)','pcs',4990],
+['dl-w17','Dimo Lumin','Switches','Intermediate Switch White (ZCL812D)','pcs',2060],
+['dl-w18','Dimo Lumin','Switches','Single TV Socket White (ZCL75TV)','pcs',2510],
+['dl-w19','Dimo Lumin','Switches','Blank Plate White (ZCL800EP)','pcs',490],
+// ─── DIMO LUMIN — Switches & Sockets BLACK ───────────────────────────
+['dl-b01','Dimo Lumin','Switches','1 Gang 1 Way Switch Black (ZCL811L/H)','pcs',900],
+['dl-b02','Dimo Lumin','Switches','1 Gang 2 Way Switch Black (ZCL812L/H)','pcs',1340],
+['dl-b03','Dimo Lumin','Switches','2 Gang 1 Way Switch Black (ZCL821L/H)','pcs',1360],
+['dl-b04','Dimo Lumin','Switches','2 Gang 2 Way Switch Black (ZCL822L/H)','pcs',1800],
+['dl-b05','Dimo Lumin','Switches','3 Gang 1 Way Switch Black (ZCL831L/H)','pcs',1870],
+['dl-b06','Dimo Lumin','Switches','3 Gang 2 Way Switch Black (ZCL832L/H)','pcs',2280],
+['dl-b07','Dimo Lumin','Switches','4 Gang 1 Way Switch Black (ZCL841L/H)','pcs',2210],
+['dl-b08','Dimo Lumin','Switches','4 Gang 2 Way Switch Black (ZCL842L/H)','pcs',2740],
+['dl-b09','Dimo Lumin','Switches','Bell Switch Black (ZCL8BL/H)','pcs',1610],
+['dl-b10','Dimo Lumin','Switches','20A Double Pole Switch w/Indicator Black','pcs',3880],
+['dl-b11','Dimo Lumin','Switches','Light Dimmer Switch Black (ZCLD/500W/T/H)','pcs',3180],
+['dl-b12','Dimo Lumin','Switches','13A Socket w/Neon Indicator Black','pcs',2270],
+['dl-b13','Dimo Lumin','Switches','Double USB Charger Socket Black','pcs',4930],
+['dl-b14','Dimo Lumin','Switches','Fan Regulator Black (ZCLS/82A/H)','pcs',4170],
+['dl-b15','Dimo Lumin','Switches','Single Tel Socket Black (ZCLT01S/H)','pcs',2770],
+['dl-b16','Dimo Lumin','Switches','Single Data Socket Black (ZCLT01CM/H)','pcs',5640],
+['dl-b17','Dimo Lumin','Switches','Intermediate Switch Black (ZCL812D/H)','pcs',2480],
+['dl-b18','Dimo Lumin','Switches','Single TV Socket Black (ZCL75TV/H)','pcs',2800],
+['dl-b19','Dimo Lumin','Switches','Blank Plate Black (ZCL800EP/H)','pcs',620],
+];
+const SUPPLIER_CATALOG = _SC.map(([id,sup,cat,name,unit,cost])=>({id,sup,cat,name,unit,cost}));
+const SCATS = [...new Set(SUPPLIER_CATALOG.map(i=>i.cat))];
+const SSUPS = ['All','Kevilton','ACL Cables','Kelani','Green Electric','Dimo Lumin'];
+
+
+const SL_BANKS = ["Bank of Ceylon","HNB","Commercial Bank","Sampath Bank","People's Bank","NDB","DFCC","Seylan Bank","Pan Asia Bank","Nations Trust Bank","Union Bank","Citi Bank","Other"];
+const CATS = ["Lighting","Circuit Breakers","Wires & Cables","Switchgear","Fans","Accessories","Tools","Conduit & Fittings","Other"];
+
+// ─── Context ──────────────────────────────────────────────────────────────────
+const Ctx = createContext(null);
+const useApp = () => useContext(Ctx);
+
+// ─── Colors ───────────────────────────────────────────────────────────────────
+const C = {red:'#CC0000',dark:'#0f0f0f',card:'#1a1a1a',border:'#2a2a2a',text:'#f0f0f0',muted:'#888',gold:'#FFD700',green:'#00C853',blue:'#1976D2',orange:'#FF6D00',purple:'#7B1FA2'};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const lkr  = n => 'Rs. '+Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');
+const lkrK = n => 'Rs. '+(Number(n||0)/1000).toFixed(1)+'K';
+const uid  = () => Date.now()+Math.floor(Math.random()*9999);
+const today= () => new Date().toISOString().split('T')[0];
+const compressImg = file => new Promise(res=>{
+  const rd=new FileReader(); rd.onload=e=>{const im=new Image(); im.onload=()=>{const MAX=1200,r=Math.min(MAX/im.width,MAX/im.height,1),cv=document.createElement('canvas'); cv.width=im.width*r; cv.height=im.height*r; cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height); res(cv.toDataURL('image/jpeg',0.75));};im.src=e.target.result;}; rd.readAsDataURL(file);
+});
+
+// ─── Export utilities ─────────────────────────────────────────────────────────
+const xlsxExport=(rows,sheet,fname)=>{const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,fname+'.xlsx');};
+const pdfExport=(title,cols,rows,fname,orient='landscape')=>{try{const{jsPDF}=window.jspdf,doc=new jsPDF({orientation:orient,unit:'mm',format:'a4'});doc.setFontSize(14);doc.setTextColor(204,0,0);doc.text('NIPPON ELECTRICALS',14,14);doc.setFontSize(11);doc.setTextColor(0);doc.text(title,14,21);doc.setFontSize(8);doc.setTextColor(120);doc.text('Exported: '+new Date().toLocaleString(),14,27);doc.autoTable({columns:cols.map(c=>({header:c.h,dataKey:c.k})),body:rows,startY:32,styles:{fontSize:8,cellPadding:2},headStyles:{fillColor:[204,0,0],textColor:255,fontStyle:'bold'},alternateRowStyles:{fillColor:[245,245,245]}});doc.save(fname+'.pdf');}catch(e){alert('PDF failed – try Excel');}};
+const exportSalesXLSX=s=>xlsxExport(s.map(x=>({'Invoice':x.invoiceNo,'Date':x.date,'Customer':x.customer,'Items':x.items.map(i=>i.name+'x'+i.qty).join(' | '),'Subtotal':x.subtotal,'Tax':x.taxAmount,'Discount':x.discount,'Total':x.total,'Payment':x.paymentMode,'Cashier':x.cashier})),'Sales','NE_Sales_Report');
+const exportSalesPDF=s=>pdfExport('Sales Report',[{h:'Invoice',k:'inv'},{h:'Date',k:'date'},{h:'Customer',k:'cust'},{h:'Items',k:'items'},{h:'Total',k:'total'},{h:'Payment',k:'pay'},{h:'Cashier',k:'cash'}],s.map(x=>({inv:x.invoiceNo,date:x.date,cust:x.customer,items:x.items.map(i=>i.name+'x'+i.qty).join(', '),total:lkr(x.total),pay:x.paymentMode,cash:x.cashier})),'NE_Sales_Report');
+const exportProductsXLSX=p=>xlsxExport(p.map(x=>({'SKU':x.sku,'Name':x.name,'Category':x.category,'Sale Price':x.price,'Cost Price':x.costPrice,'Stock':x.stock,'Unit':x.unit,'Tax%':x.taxRate,'Status':x.active?'Active':'Inactive'})),'Products','NE_Products');
+const exportProductsPDF=p=>pdfExport('Products Report',[{h:'SKU',k:'sku'},{h:'Name',k:'name'},{h:'Category',k:'cat'},{h:'Sale Price',k:'price'},{h:'Stock',k:'stock'},{h:'Status',k:'st'}],p.map(x=>({sku:x.sku,name:x.name,cat:x.category,price:lkr(x.price),stock:x.stock+' '+x.unit,st:x.active?'Active':'Inactive'})),'NE_Products');
+const exportChequesXLSX=c=>xlsxExport(c.map(x=>({'Category':x.category,'Party':x.customerName||x.companyName,'Cheque No':x.chequeNo,'Bank':x.bank,'Amount':x.amount,'Date':x.chequeDate,'Status':x.status})),'Cheques','NE_Cheques');
+const exportChequesPDF=c=>pdfExport('Cheques Report',[{h:'Category',k:'cat'},{h:'Party',k:'party'},{h:'Cheque No',k:'no'},{h:'Bank',k:'bank'},{h:'Amount',k:'amt'},{h:'Status',k:'st'}],c.map(x=>({cat:x.category,party:x.customerName||x.companyName,no:x.chequeNo,bank:x.bank,amt:lkr(x.amount),st:x.status})),'NE_Cheques');
+const exportCompaniesXLSX=(cos,prods)=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(cos.map(c=>({'Name':c.name,'Type':c.type,'Contact':c.contactPerson,'Phone':c.phone,'Email':c.email,'Status':c.active?'Active':'Inactive'}))),'Companies');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(prods.filter(p=>p.supplierId).map(p=>({'Company':p.supplierName,'SKU':p.sku,'Name':p.name,'Sale Price':p.price,'Cost':p.costPrice,'Stock':p.stock}))),'Company Products');XLSX.writeFile(wb,'NE_Companies.xlsx');};
+const exportCompaniesPDF=(cos,prods)=>pdfExport('Companies Report',[{h:'Company',k:'name'},{h:'Type',k:'type'},{h:'Contact',k:'contact'},{h:'Phone',k:'phone'},{h:'Products',k:'prods'},{h:'Status',k:'st'}],cos.map(c=>({name:c.name,type:c.type,contact:c.contactPerson,phone:c.phone,prods:prods.filter(p=>p.supplierId===c.id).length+' items',st:c.active?'Active':'Inactive'})),'NE_Companies');
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LOGO — SVG Bulb
+// ═══════════════════════════════════════════════════════════════════════
+const NipponLogo = ({size=48,glow=false}) => (
+  <svg width={size} height={size} viewBox="0 0 80 80" fill="none"
+    className={glow?'logo-glow':''} style={{borderRadius:'20%',display:'block',flexShrink:0}}>
+    <defs>
+      <radialGradient id="bg1" cx="40%" cy="25%" r="70%">
+        <stop offset="0%" stopColor="#FF3333"/>
+        <stop offset="100%" stopColor="#7A0000"/>
+      </radialGradient>
+      <radialGradient id="blb" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stopColor="#FFEE88"/>
+        <stop offset="100%" stopColor="#FF9900" stopOpacity="0.5"/>
+      </radialGradient>
+    </defs>
+    {/* Background */}
+    <rect width="80" height="80" rx="18" fill="url(#bg1)"/>
+    {/* Subtle shine top-left */}
+    <ellipse cx="26" cy="18" rx="18" ry="12" fill="rgba(255,255,255,0.08)" transform="rotate(-20 26 18)"/>
+    {/* Glow halo behind bulb */}
+    <ellipse cx="40" cy="33" rx="17" ry="17" fill="url(#blb)" opacity="0.45" className={glow?'bulb-anim':''}/>
+    {/* Bulb dome */}
+    <path d="M27 33 Q27 18 40 17 Q53 18 53 33 Q53 43 47.5 47 L32.5 47 Q27 43 27 33Z" fill="#FFF9E0" opacity="0.95"/>
+    {/* Glass shine */}
+    <ellipse cx="34.5" cy="26" rx="4" ry="6" fill="white" opacity="0.25" transform="rotate(-22 34.5 26)"/>
+    {/* Filament */}
+    <path d="M37.5 38.5 L37.5 33 Q40 30.5 42.5 33 L42.5 38.5" stroke="#E67E00" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
+    {/* Inner glow lines */}
+    <path d="M35 36 Q37.5 33 40 36 Q42.5 33 45 36" stroke="#FFB300" strokeWidth="1" fill="none" opacity="0.55"/>
+    {/* Base */}
+    <rect x="33.5" y="47" width="13" height="3"  rx="1.2" fill="#D4A800" opacity="0.9"/>
+    <rect x="33"   y="50" width="14" height="2.5" rx="1.2" fill="#B8920A" opacity="0.9"/>
+    <rect x="34"   y="52.5" width="12" height="2" rx="1"   fill="#9A7A08" opacity="0.85"/>
+    <rect x="36.5" y="54.5" width="7"  height="2.5" rx="1.5" fill="#7A6006" opacity="0.8"/>
+    {/* Spark rays */}
+    <line x1="40" y1="10" x2="40" y2="14.5" stroke="#FFD700" strokeWidth="2"   strokeLinecap="round" opacity="0.9"/>
+    <line x1="53" y1="13" x2="50.5" y2="16.5" stroke="#FFD700" strokeWidth="1.6" strokeLinecap="round" opacity="0.75"/>
+    <line x1="27" y1="13" x2="29.5" y2="16.5" stroke="#FFD700" strokeWidth="1.6" strokeLinecap="round" opacity="0.75"/>
+    <line x1="58" y1="24" x2="54"   y2="25.5" stroke="#FFD700" strokeWidth="1.3" strokeLinecap="round" opacity="0.55"/>
+    <line x1="22" y1="24" x2="26"   y2="25.5" stroke="#FFD700" strokeWidth="1.3" strokeLinecap="round" opacity="0.55"/>
+  </svg>
+);
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ICONS
+// ═══════════════════════════════════════════════════════════════════════
+const Ic = ({n,s=20,c="currentColor"}) => {
+  const I={
+    home:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+    pos:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="7" y1="14" x2="7" y2="18"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="17" y1="14" x2="17" y2="18"/></svg>,
+    box:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>,
+    users: <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+    chq:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="14" x2="10" y2="14"/></svg>,
+    out:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+    add:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>,
+    edit:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>,
+    del:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>,
+    srch:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+    cart:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>,
+    print: <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
+    x:     <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+    ok:    <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>,
+    warn:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+    coin:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
+    back:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,
+    eye:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+    eyeoff:<svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+    dl:    <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+    img:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
+    ret:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>,
+    xls:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+    pdf2:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/></svg>,
+    bldg:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M9 21V9"/></svg>,
+    phone: <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.35 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.06 6.06l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
+    tag:   <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>,
+    link:  <svg width={s} height={s} fill="none" stroke={c} strokeWidth="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+  };
+  return I[n]||null;
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  UI COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════
+const Badge = ({ch,col=C.red}) => (
+  <span className="anim-popIn" style={{background:col+'22',color:col,border:`1px solid ${col}44`,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,letterSpacing:0.4,whiteSpace:'nowrap',display:'inline-block'}}>{ch}</span>
+);
+
+const Btn = ({ch,onClick,v='pri',sz='md',dis,full,st={}}) => {
+  const vs={pri:{background:C.red,color:'#fff',border:'none'},out:{background:'transparent',color:C.red,border:`1.5px solid ${C.red}`},ok:{background:C.green,color:'#fff',border:'none'},dk:{background:C.border,color:C.text,border:'none'},ghost:{background:'transparent',color:C.muted,border:'none'}};
+  const ss={sm:{padding:'6px 12px',fontSize:12},md:{padding:'10px 18px',fontSize:14},lg:{padding:'13px 22px',fontSize:15}};
+  const rip = e => {
+    const btn=e.currentTarget,r=document.createElement('span'),d=Math.max(btn.clientWidth,btn.clientHeight),rect=btn.getBoundingClientRect();
+    r.className='rip'; r.style.cssText=`width:${d}px;height:${d}px;left:${e.clientX-rect.left-d/2}px;top:${e.clientY-rect.top-d/2}px`;
+    btn.appendChild(r); setTimeout(()=>r.remove(),560);
+  };
+  return <button onMouseDown={rip} onClick={e=>{onClick&&onClick(e);}} disabled={dis} className="btn-ripple"
+    style={{...vs[v],...ss[sz],borderRadius:8,fontFamily:"'Noto Sans JP'",fontWeight:600,cursor:dis?'not-allowed':'pointer',opacity:dis?0.5:1,width:full?'100%':'auto',transition:'all 0.16s',display:'inline-flex',alignItems:'center',gap:6,justifyContent:'center',flexShrink:0,...st}}>{ch}</button>;
+};
+
+const Card = ({ch,st={},onClick}) => (
+  <div onClick={onClick} className={onClick?'card-tap':''}
+    style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,padding:14,cursor:onClick?'pointer':'default',...st}}>{ch}</div>
+);
+
+const Inp = ({lbl,val,set,type='text',ph,req,dis,st={}}) => (
+  <div style={{marginBottom:13}}>
+    {lbl&&<label style={{display:'block',fontSize:11,color:C.muted,marginBottom:5,letterSpacing:0.5,textTransform:'uppercase'}}>{lbl}{req&&<span style={{color:C.red}}> *</span>}</label>}
+    <input type={type} value={val} onChange={e=>set(e.target.value)} placeholder={ph} disabled={dis}
+      style={{width:'100%',background:'#242424',border:`1.5px solid ${C.border}`,borderRadius:8,padding:'10px 13px',color:C.text,fontSize:14,fontFamily:"'Noto Sans JP'",outline:'none',transition:'border 0.2s',...st}}
+      onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+  </div>
+);
+
+const Sel = ({lbl,val,set,opts,req}) => (
+  <div style={{marginBottom:13}}>
+    {lbl&&<label style={{display:'block',fontSize:11,color:C.muted,marginBottom:5,letterSpacing:0.5,textTransform:'uppercase'}}>{lbl}{req&&<span style={{color:C.red}}> *</span>}</label>}
+    <select value={val} onChange={e=>set(e.target.value)}
+      style={{width:'100%',background:'#242424',border:`1.5px solid ${C.border}`,borderRadius:8,padding:'10px 13px',color:C.text,fontSize:14,fontFamily:"'Noto Sans JP'",outline:'none',appearance:'none',transition:'border 0.2s'}}
+      onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}>
+      {opts.map((o,i)=>typeof o==='string'?<option key={i} value={o}>{o}</option>:<option key={i} value={o.v}>{o.l}</option>)}
+    </select>
+  </div>
+);
+
+const Textarea = ({lbl,val,set,ph}) => (
+  <div style={{marginBottom:13}}>
+    {lbl&&<label style={{display:'block',fontSize:11,color:C.muted,marginBottom:5,letterSpacing:0.5,textTransform:'uppercase'}}>{lbl}</label>}
+    <textarea value={val} onChange={e=>set(e.target.value)} placeholder={ph} rows={3}
+      style={{width:'100%',background:'#242424',border:`1.5px solid ${C.border}`,borderRadius:8,padding:'10px 13px',color:C.text,fontSize:14,fontFamily:"'Noto Sans JP'",outline:'none',resize:'vertical',transition:'border 0.2s'}}
+      onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+  </div>
+);
+
+const Modal = ({open,onClose,title,ch}) => {
+  if(!open) return null;
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.88)',zIndex:1000,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} className="anim-slideUp"
+        style={{background:'#1a1a1a',borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,maxHeight:'93vh',overflow:'auto',padding:22,borderTop:`3px solid ${C.red}`}}>
+        <div style={{width:38,height:4,background:C.border,borderRadius:2,margin:'0 auto 18px'}}/>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <h2 style={{fontSize:17,fontWeight:700}}>{title}</h2>
+          <button onClick={onClose} style={{background:C.border,border:'none',borderRadius:8,padding:'6px 8px',color:C.muted,cursor:'pointer',display:'flex',alignItems:'center'}}><Ic n="x" s={18} c={C.muted}/></button>
+        </div>
+        {ch}
+      </div>
+    </div>
+  );
+};
+
+const Toast = ({t}) => {
+  if(!t) return null;
+  const co={success:C.green,error:C.red,info:C.blue};
+  const ic={success:'ok',error:'warn',info:'warn'};
+  return <div style={{position:'fixed',bottom:88,left:'50%',transform:'translateX(-50%)',background:co[t.type]||C.blue,color:'#fff',padding:'12px 22px',borderRadius:14,zIndex:9999,fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:8,boxShadow:'0 8px 32px rgba(0,0,0,0.55)',whiteSpace:'nowrap',animation:'toastIn 0.28s cubic-bezier(.34,1.56,.64,1) both'}}>
+    <Ic n={ic[t.type]||'ok'} s={15} c="#fff"/>{t.msg}
+  </div>;
+};
+
+const StatBox = ({lbl,val,col,icon}) => (
+  <div className="anim-fadeUp" style={{flex:1,background:C.card,borderRadius:12,padding:'14px 12px',border:`1px solid ${C.border}`,borderLeft:`3px solid ${col}`,overflow:'hidden',position:'relative'}}>
+    <div style={{position:'absolute',top:8,right:10,opacity:0.08}}><Ic n={icon} s={34} c={col}/></div>
+    <div style={{fontSize:10,color:C.muted,letterSpacing:0.5,textTransform:'uppercase',marginBottom:4}}>{lbl}</div>
+    <div style={{fontSize:18,fontWeight:900,color:col,fontFamily:"'Space Mono'"}}>{val}</div>
+  </div>
+);
+
+const SectionHeader = ({title,right}) => (
+  <div className="anim-slideDown" style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,paddingBottom:12,borderBottom:`1px solid ${C.border}`}}>
+    <h2 style={{fontSize:16,fontWeight:900,letterSpacing:0.5}}>{title}</h2>
+    {right&&<div style={{display:'flex',gap:8,alignItems:'center'}}>{right}</div>}
+  </div>
+);
+
+const ExportMenu = ({onXLSX,onPDF}) => {
+  const [open,setOpen] = useState(false);
+  return (
+    <div style={{position:'relative'}}>
+      <Btn ch={<><Ic n="dl" s={13} c={C.green}/>Export</>} v="dk" sz="sm" onClick={()=>setOpen(o=>!o)}/>
+      {open&&(
+        <div className="anim-popIn" onClick={()=>setOpen(false)} style={{position:'absolute',right:0,top:'110%',background:'#222',border:`1px solid ${C.border}`,borderRadius:10,padding:6,zIndex:100,minWidth:130,boxShadow:'0 8px 24px rgba(0,0,0,0.5)'}}>
+          <button onClick={onXLSX} style={{display:'flex',alignItems:'center',gap:8,width:'100%',background:'none',border:'none',color:C.green,padding:'8px 12px',cursor:'pointer',borderRadius:6,fontSize:12,fontWeight:700,transition:'background 0.15s'}} onMouseEnter={e=>e.currentTarget.style.background='#2a2a2a'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Ic n="xls" s={14} c={C.green}/>Excel</button>
+          <button onClick={onPDF}  style={{display:'flex',alignItems:'center',gap:8,width:'100%',background:'none',border:'none',color:C.red, padding:'8px 12px',cursor:'pointer',borderRadius:6,fontSize:12,fontWeight:700,transition:'background 0.15s'}} onMouseEnter={e=>e.currentTarget.style.background='#2a2a2a'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Ic n="pdf2" s={14} c={C.red}/>PDF</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SETUP SCREEN
+// ═══════════════════════════════════════════════════════════════════════
+function SetupScreen({onConnected}) {
+  const [step,setStep]=useState(1);
+  const [url,setUrl]=useState('');
+  const [key,setKey]=useState('');
+  const [testing,setTesting]=useState(false);
+  const [err,setErr]=useState('');
+  const [copied,setCopied]=useState(false);
+
+  const SQL=`create table if not exists users     (id bigint primary key, data jsonb not null);
+create table if not exists products  (id bigint primary key, data jsonb not null);
+create table if not exists sales     (id bigint primary key, data jsonb not null);
+create table if not exists cheques   (id bigint primary key, data jsonb not null);
+create table if not exists companies (id bigint primary key, data jsonb not null);
+alter table users     disable row level security;
+alter table products  disable row level security;
+alter table sales     disable row level security;
+alter table cheques   disable row level security;
+alter table companies disable row level security;
+alter publication supabase_realtime add table users;
+alter publication supabase_realtime add table products;
+alter publication supabase_realtime add table sales;
+alter publication supabase_realtime add table cheques;
+alter publication supabase_realtime add table companies;
+insert into users (id, data) values (1, '{"id":1,"name":"Admin","username":"admin","password":"admin123","role":"admin","email":"","active":true,"avatar":"A","createdAt":"2025-01-01"}') on conflict (id) do nothing;`;
+
+  const copySQL=()=>{navigator.clipboard.writeText(SQL).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});};
+
+  const connect=async()=>{
+    if(!url.includes('supabase.co')||!key){setErr('Enter valid Supabase URL and anon key.');return;}
+    setTesting(true);setErr('');
+    try{
+      initSupabase(url.trim(),key.trim());
+      const{error}=await _sb.from('users').select('id',{count:'exact',head:true});
+      if(error)throw new Error(error.message);
+      saveCfg(url.trim(),key.trim());
+      onConnected();
+    }catch(e){setErr('Connection failed: '+e.message);_sb=null;}
+    setTesting(false);
+  };
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',padding:'32px 18px'}}>
+      <div className="anim-float" style={{marginBottom:24,textAlign:'center'}}>
+        <NipponLogo size={80} glow={true}/>
+      </div>
+      <h1 className="anim-slideDown" style={{fontSize:20,fontWeight:900,marginBottom:4}}>NIPPON ELECTRICALS</h1>
+      <p className="anim-fadeIn" style={{fontSize:11,color:C.muted,letterSpacing:1.2,marginBottom:28}}>DATABASE SETUP</p>
+
+      <div style={{display:'flex',gap:8,marginBottom:28,alignItems:'center'}}>
+        {[1,2].map(s=>(
+          <React.Fragment key={s}>
+            <div style={{width:28,height:28,borderRadius:'50%',background:step>=s?C.red:C.border,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:step>=s?'#fff':C.muted,transition:'all 0.3s'}}>{s}</div>
+            {s<2&&<div style={{width:40,height:2,background:step>1?C.red:C.border,borderRadius:2,transition:'background 0.4s'}}/>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <div className="anim-fadeUp" style={{width:'100%',maxWidth:440}}>
+        {step===1&&(
+          <div style={{background:C.card,borderRadius:16,padding:22,border:`1px solid ${C.border}`,marginBottom:16}}>
+            <h2 style={{fontSize:15,fontWeight:700,marginBottom:4}}>Step 1 — Create Supabase Project</h2>
+            <p style={{fontSize:12,color:C.muted,marginBottom:18,lineHeight:1.7}}>Supabase is a free cloud database that syncs across all your shop devices in real-time.</p>
+            {[['1','Go to supabase.com and create a free account'],['2','Click New Project → name it "nippon-pos" → Create'],['3','Wait ~2 minutes for project to be ready'],['4','Go to SQL Editor → New Query'],['5','Paste the SQL below and click Run']].map(([n,t])=>(
+              <div key={n} style={{display:'flex',gap:10,marginBottom:12}}>
+                <div style={{width:22,height:22,borderRadius:'50%',background:C.red,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#fff',flexShrink:0}}>{n}</div>
+                <p style={{fontSize:13,color:C.text,lineHeight:1.5}}>{t}</p>
+              </div>
+            ))}
+            <div style={{background:'#0d1117',borderRadius:10,padding:12,border:`1px solid ${C.border}`}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <span style={{fontSize:10,color:C.muted,letterSpacing:1,textTransform:'uppercase'}}>SQL Setup Script</span>
+                <button onClick={copySQL} style={{background:copied?C.green:C.border,border:'none',borderRadius:6,padding:'4px 10px',color:'#fff',fontSize:11,cursor:'pointer',fontWeight:700,transition:'background 0.2s'}}>{copied?'✓ Copied!':'Copy SQL'}</button>
+              </div>
+              <pre style={{fontSize:9,color:'#7ee787',fontFamily:"'Space Mono'",overflow:'auto',maxHeight:160,margin:0,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{SQL}</pre>
+            </div>
+          </div>
+        )}
+        {step===1&&<Btn ch="I've run the SQL — Next →" onClick={()=>setStep(2)} full sz="lg"/>}
+
+        {step===2&&(
+          <>
+            <div style={{background:C.card,borderRadius:16,padding:22,border:`1px solid ${C.border}`,marginBottom:16}}>
+              <h2 style={{fontSize:15,fontWeight:700,marginBottom:4}}>Step 2 — Enter Supabase Credentials</h2>
+              <p style={{fontSize:12,color:C.muted,marginBottom:16,lineHeight:1.6}}>Find these in: Supabase → Project Settings → API</p>
+              <Inp lbl="Project URL *" val={url} set={setUrl} ph="https://xxxxxxxxxxxx.supabase.co"/>
+              <Inp lbl="Anon / Public Key *" val={key} set={setKey} ph="eyJhbGciOi..."/>
+              {err&&<div style={{background:'#3a1a1a',borderRadius:8,padding:'10px 14px',fontSize:12,color:'#ff8888',lineHeight:1.5,marginTop:4}}>{err}</div>}
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <Btn ch="← Back" v="dk" onClick={()=>setStep(1)} sz="lg"/>
+              <Btn ch={testing?'Connecting…':'Connect & Start'} onClick={connect} dis={testing} st={{flex:1}} sz="lg"/>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LOGIN
+// ═══════════════════════════════════════════════════════════════════════
+function LoginPage() {
+  const {users,login,toast2}=useApp();
+  const [u,setU]=useState('');
+  const [p,setP]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const doLogin=()=>{
+    setLoading(true);
+    setTimeout(()=>{
+      const found=users.find(x=>x.username===u.trim()&&x.password===p);
+      if(!found){toast2('Invalid credentials','error');setLoading(false);return;}
+      if(!found.active){toast2('Account deactivated','error');setLoading(false);return;}
+      login(found);
+    },400);
+  };
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'20px 18px'}}>
+      <div className="anim-float" style={{marginBottom:20,textAlign:'center'}}>
+        <NipponLogo size={92} glow={true}/>
+      </div>
+      <h1 className="anim-slideDown" style={{fontSize:24,fontWeight:900,letterSpacing:-0.5,marginBottom:2}}>NIPPON ELECTRICALS</h1>
+      <p className="anim-fadeIn" style={{fontSize:11,color:C.muted,letterSpacing:1.4,marginBottom:36}}>SMART POS SYSTEM · LKR</p>
+
+      <div className="anim-fadeUp" style={{width:'100%',maxWidth:360,background:C.card,borderRadius:18,padding:28,border:`1px solid ${C.border}`,borderTop:`3px solid ${C.red}`,boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}}>
+        <h2 style={{fontSize:16,fontWeight:700,marginBottom:20,textAlign:'center'}}>Staff Login</h2>
+        <div style={{background:'#1a1500',border:`1px solid ${C.gold}33`,borderRadius:10,padding:'10px 14px',marginBottom:20,fontSize:12,color:C.gold,lineHeight:1.6}}>
+          Default: <strong>admin</strong> / <strong>admin123</strong> — change after first login
+        </div>
+        <Inp lbl="Username" val={u} set={setU} ph="Enter username"/>
+        <Inp lbl="Password" val={p} set={setP} type="password" ph="Enter password"/>
+        <Btn ch={loading?<><span style={{display:'inline-block',animation:'spin 0.6s linear infinite'}}>↻</span> Signing in…</>:'Sign In'} onClick={doLogin} dis={loading} full sz="lg" st={{marginTop:4}}/>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════════════════════════════
+function Nav({pg,setPg,user}) {
+  const {logout}=useApp();
+  const tabs=[
+    ['dash','home','Home'],
+    ['pos','pos','POS'],
+    ['prod','box','Products'],
+    ...(user.role!=='cashier'?[['comp','bldg','Companies'],['chq','chq','Cheques']]:[] ),
+    ...(user.role!=='cashier'?[['quot','tag','Quote']]:[] ),
+    ...(user.role==='admin'?[['accts','users','Users']]:[] ),
+  ];
+  return (
+    <nav style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:480,background:'#141414',borderTop:`1px solid ${C.border}`,display:'flex',zIndex:500,paddingBottom:'env(safe-area-inset-bottom)'}}>
+      {tabs.map(([id,ic,lb])=>{
+        const active=pg===id;
+        return (
+          <button key={id} onClick={()=>setPg(id)}
+            style={{flex:1,padding:'10px 4px 8px',background:'none',border:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3,transition:'opacity 0.15s',opacity:active?1:0.55}}>
+            <div className={active?'nav-icon-active':''} style={{color:active?C.red:C.muted,display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <Ic n={ic} s={20} c={active?C.red:C.muted}/>
+            </div>
+            <span style={{fontSize:9,color:active?C.red:C.muted,fontWeight:active?700:400,letterSpacing:0.3}}>{lb}</span>
+            {active&&<div style={{width:4,height:4,borderRadius:'50%',background:C.red,marginTop:1}}/>}
+          </button>
+        );
+      })}
+      {/* Logout button */}
+      <button onClick={()=>{if(confirm('Log out?'))logout();}}
+        style={{flex:1,padding:'10px 4px 8px',background:'none',border:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3,opacity:0.55,transition:'opacity 0.15s'}}
+        onMouseEnter={e=>e.currentTarget.style.opacity='1'} onMouseLeave={e=>e.currentTarget.style.opacity='0.55'}>
+        <Ic n="out" s={20} c="#ff6666"/>
+        <span style={{fontSize:9,color:'#ff6666',fontWeight:400,letterSpacing:0.3}}>Logout</span>
+      </button>
+    </nav>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════
+function Dashboard() {
+  const {user,products,sales,cheques,logout}=useApp();
+  const todaySales=sales.filter(s=>s.date===today());
+  const todayRev=todaySales.reduce((a,s)=>a+s.total,0);
+  const monthSales=sales.filter(s=>s.date&&s.date.startsWith(today().slice(0,7)));
+  const monthRev=monthSales.reduce((a,s)=>a+s.total,0);
+  const lowStock=products.filter(p=>p.active&&p.stock<=p.minStock);
+  const pendingCheques=cheques.filter(c=>c.status==='pending');
+
+  return (
+    <div style={{paddingBottom:90}}>
+      {/* Header */}
+      <div className="anim-slideDown" style={{background:`linear-gradient(135deg,${C.red} 0%,#7A0000 100%)`,padding:'20px 16px 18px',position:'relative',overflow:'hidden'}}>
+        <div style={{position:'absolute',top:-8,right:-10,opacity:0.08}}><NipponLogo size={110}/></div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{display:'flex',alignItems:'center',gap:12}}>
+            <NipponLogo size={48}/>
+            <div>
+              <p style={{fontSize:10,color:'#ffbbbb',letterSpacing:0.8}}>{new Date().toLocaleDateString('en-LK',{weekday:'long',day:'numeric',month:'short',year:'numeric'})}</p>
+              <h1 style={{fontSize:17,fontWeight:900,color:'#fff',letterSpacing:0.5}}>NIPPON ELECTRICALS</h1>
+              <p style={{fontSize:11,color:'#ffcccc'}}>Hi, {user.name} · {user.role.toUpperCase()}</p>
+            </div>
+          </div>
+          <button onClick={logout} style={{background:'rgba(255,255,255,0.15)',border:'none',borderRadius:10,padding:'8px 12px',color:'#fff',cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',gap:5,fontWeight:600,transition:'background 0.2s'}} onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.25)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.15)'}>
+            <Ic n="out" s={14} c="#fff"/>Out
+          </button>
+        </div>
+      </div>
+
+      <div style={{padding:'14px 14px 0'}}>
+        {/* Today Stats */}
+        <p style={{fontSize:10,color:C.muted,letterSpacing:1,textTransform:'uppercase',marginBottom:10}}>Today's Performance</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
+          <StatBox lbl="Today Revenue" val={lkrK(todayRev)} col={C.green} icon="coin"/>
+          <StatBox lbl="Today Sales" val={todaySales.length} col={C.blue} icon="pos"/>
+          <StatBox lbl="Month Revenue" val={lkrK(monthRev)} col={C.gold} icon="coin"/>
+          <StatBox lbl="Low Stock" val={lowStock.length} col={lowStock.length>0?C.orange:C.muted} icon="warn"/>
+        </div>
+
+        {/* Pending cheques alert */}
+        {pendingCheques.length>0&&(
+          <div className="anim-fadeUp" style={{background:'#1a1000',border:`1px solid ${C.gold}44`,borderRadius:12,padding:'12px 14px',marginBottom:14,display:'flex',alignItems:'center',gap:10}}>
+            <Ic n="chq" s={18} c={C.gold}/>
+            <div><div style={{fontSize:13,fontWeight:700,color:C.gold}}>{pendingCheques.length} Pending Cheques</div>
+            <div style={{fontSize:11,color:C.muted}}>Total: {lkr(pendingCheques.reduce((a,c)=>a+c.amount,0))}</div></div>
+          </div>
+        )}
+
+        {/* Low Stock */}
+        {lowStock.length>0&&(
+          <Card st={{marginBottom:14,borderLeft:`3px solid ${C.orange}`}} ch={
+            <>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><Ic n="warn" s={16} c={C.orange}/><span style={{fontWeight:700,color:C.orange,fontSize:13}}>Low Stock Alert</span></div>
+              {lowStock.slice(0,5).map(p=>(
+                <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 0',borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:12}}>{p.name}</span><Badge ch={p.stock+' '+p.unit+' left'} col={C.orange}/>
+                </div>
+              ))}
+            </>
+          }/>
+        )}
+
+        {/* Recent Sales */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <h3 style={{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}}>RECENT TRANSACTIONS</h3>
+          {sales.length>0&&<div style={{display:'flex',gap:6}}>
+            <button onClick={()=>exportSalesXLSX(sales)} style={{background:C.border,border:'none',borderRadius:6,padding:'4px 10px',color:C.green,fontSize:10,cursor:'pointer',fontWeight:700,display:'flex',alignItems:'center',gap:4}}><Ic n="xls" s={12} c={C.green}/>XLS</button>
+            <button onClick={()=>exportSalesPDF(sales)} style={{background:C.border,border:'none',borderRadius:6,padding:'4px 10px',color:C.red,fontSize:10,cursor:'pointer',fontWeight:700,display:'flex',alignItems:'center',gap:4}}><Ic n="pdf2" s={12} c={C.red}/>PDF</button>
+          </div>}
+        </div>
+        {[...sales].reverse().slice(0,8).map((s,i)=>(
+          <div key={s.id} className="anim-fadeUp" style={{background:C.card,borderRadius:10,padding:'11px 13px',marginBottom:8,border:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'center',animationDelay:`${i*0.05}s`}}>
+            <div><div style={{fontSize:13,fontWeight:600}}>{s.customer}</div><div style={{fontSize:11,color:C.muted}}>{s.invoiceNo} · {s.date}</div></div>
+            <div style={{textAlign:'right'}}><div style={{fontSize:14,fontWeight:700,color:C.green,fontFamily:"'Space Mono'"}}>{lkr(s.total)}</div><Badge ch={s.paymentMode} col={C.green}/></div>
+          </div>
+        ))}
+        {sales.length===0&&(
+          <Card ch={<div style={{textAlign:'center',padding:'24px 0',color:C.muted}}><Ic n="pos" s={36} c={C.muted}/><p style={{marginTop:10,fontSize:13}}>No sales yet</p><p style={{fontSize:11,marginTop:4}}>Create your first bill in the POS tab</p></div>}/>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  POS PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function POSPage() {
+  const {products,user,onSaleComplete,toast2}=useApp();
+  const [cart,setCart]   =useState([]);
+  const [srch,setSrch]   =useState('');
+  const [cust,setCust]   =useState('Walk-in Customer');
+  const [pay,setPay]     =useState('cash');
+  const [disc,setDisc]   =useState('');
+  const [paid,setPaid]   =useState('');
+  const [tab,setTab]     =useState('grid');   // 'grid' | 'cart' | 'catalog'
+  const [posSupFlt,setPosSupFlt]=useState('All');
+  const [posCatFlt,setPosCatFlt]=useState('All');
+  const [posSrch2,setPosSrch2] =useState('');
+  const [cat,setCat]     =useState('All');
+  const [chqNo,setChqNo] =useState('');
+  const [chqBk,setChqBk] =useState('');
+  const [busy,setBusy]   =useState(false);
+  const [flashId,setFlashId]=useState(null);
+  const [badgeK,setBadgeK]  =useState(0);
+
+  const cats=['All',...CATS];
+  const filtered=products.filter(p=>p.active&&(cat==='All'||p.category===cat)&&p.name.toLowerCase().includes(srch.toLowerCase()));
+
+  const add=p=>{
+    if(p.stock<=0){toast2('Out of stock!','error');return;}
+    setCart(prev=>{
+      const ex=prev.find(i=>i.pid===p.id);
+      if(ex){if(ex.qty>=p.stock){toast2('Max stock!','error');return prev;} return prev.map(i=>i.pid===p.id?{...i,qty:i.qty+1}:i);}
+      return [...prev,{pid:p.id,name:p.name,price:p.price,qty:1,tax:p.taxRate||0,sku:p.sku||''}];
+    });
+    setFlashId(p.id); setBadgeK(k=>k+1);
+    setTimeout(()=>setFlashId(null),380);
+    toast2(p.name+' added ✓','success');
+  };
+  const updQty=(pid,d)=>setCart(prev=>prev.map(i=>i.pid===pid?{...i,qty:Math.max(1,i.qty+d)}:i));
+  const rem=pid=>setCart(prev=>prev.filter(i=>i.pid!==pid));
+  const clearAll=()=>{setCart([]);setDisc('');setPaid('');setChqNo('');setChqBk('');setCust('Walk-in Customer');setPay('cash');};
+
+  const discN=Math.max(0,parseFloat(disc)||0);
+  const sub  =cart.reduce((a,i)=>a+i.price*i.qty,0);
+  const tax  =cart.reduce((a,i)=>a+(i.price*i.qty*(i.tax||0)/100),0);
+  const total=Math.max(0,sub+tax-discN);
+  const chng =parseFloat(paid||0)-total;
+  const cnt  =cart.reduce((a,i)=>a+i.qty,0);
+
+  const checkout=async()=>{
+    if(!cart.length){toast2('Cart is empty!','error');return;}
+    if(pay==='cash'&&parseFloat(paid||0)<total){toast2('Insufficient payment!','error');return;}
+    if(pay==='cheque'&&(!chqNo||!chqBk)){toast2('Enter cheque details!','error');return;}
+    setBusy(true);
+    try{
+      const inv={id:uid(),date:today(),customer:cust.trim()||'Walk-in Customer',items:[...cart],subtotal:sub,taxAmount:tax,total,discount:discN,paid:parseFloat(paid||total),change:Math.max(0,chng),paymentMode:pay,cashier:user.username,status:'completed',invoiceNo:'NE-'+today().replace(/-/g,'').slice(2)+'-'+String(uid()).slice(-4),chqDet:pay==='cheque'?{no:chqNo,bank:chqBk}:null,createdAt:new Date().toISOString()};
+      await onSaleComplete(inv);
+    }catch(e){toast2('Checkout failed: '+e.message,'error');setBusy(false);}
+  };
+
+  return (
+    <div style={{height:'100vh',display:'flex',flexDirection:'column',paddingBottom:70}}>
+      {/* Header bar with logo */}
+      <div style={{background:C.card,padding:'10px 13px',borderBottom:`1px solid ${C.border}`,display:'flex',gap:8,alignItems:'center'}}>
+        <NipponLogo size={32}/>
+        <div style={{flex:1,position:'relative'}}>
+          <div style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)'}}><Ic n="srch" s={14} c={C.muted}/></div>
+          <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search products…"
+            style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 10px 8px 30px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none'}}
+            onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+        </div>
+        <button title="New Bill" onClick={()=>{if(cart.length===0||confirm('Clear current cart and start new bill?')){clearAll();setTab('grid');}}} style={{background:'#1a3a1a',border:`1px solid ${C.green}44`,borderRadius:8,padding:'7px 10px',cursor:'pointer',display:'flex',alignItems:'center',gap:4,color:C.green,fontSize:11,fontWeight:700,flexShrink:0,whiteSpace:'nowrap'}}>
+          <Ic n="add" s={15} c={C.green}/>New
+        </button>
+        <button onClick={()=>setTab(t=>t==='grid'?'cart':'grid')}
+          style={{position:'relative',background:tab==='cart'?C.red:C.border,border:'none',borderRadius:8,padding:'8px 11px',cursor:'pointer',display:'flex',alignItems:'center',transition:'background 0.2s'}}>
+          <Ic n="cart" s={18} c="#fff"/>
+          {cnt>0&&<span key={badgeK} className="cart-badge" style={{background:'#fff',color:C.red,borderRadius:'50%',width:17,height:17,fontSize:9,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',position:'absolute',top:-5,right:-5}}>{cnt}</span>}
+        </button>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{display:'flex',background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+        {[['grid','box','My Products'],['catalog','tag','Catalog'],['cart','cart',cnt>0?`Cart (${cnt})`:'Cart']].map(([v,ic,lb])=>(
+          <button key={v} onClick={()=>setTab(v)} style={{flex:1,padding:'9px 4px',background:'none',border:'none',cursor:'pointer',color:tab===v?C.red:C.muted,fontWeight:tab===v?700:400,fontSize:12,borderBottom:tab===v?`2px solid ${C.red}`:'2px solid transparent',display:'flex',alignItems:'center',justifyContent:'center',gap:6,transition:'color 0.2s'}}>
+            <Ic n={ic} s={14} c={tab===v?C.red:C.muted}/>{lb}
+          </button>
+        ))}
+      </div>
+
+      {/* PRODUCTS GRID */}
+      {tab==='grid'&&(
+        <div style={{flex:1,overflow:'auto'}}>
+          <div style={{display:'flex',gap:6,padding:'10px 12px',overflow:'auto',borderBottom:`1px solid ${C.border}`}}>
+            {cats.map(c=>(
+              <button key={c} onClick={()=>setCat(c)} style={{background:cat===c?C.red:C.border,border:'none',borderRadius:20,padding:'5px 13px',color:'#fff',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontWeight:cat===c?700:400,transition:'all 0.18s',transform:cat===c?'scale(1.06)':'scale(1)'}}>
+                {c}
+              </button>
+            ))}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,padding:12}}>
+            {filtered.map(p=>{
+              const inCart=cart.find(i=>i.pid===p.id);
+              const flash=flashId===p.id;
+              return (
+                <div key={p.id} onClick={()=>add(p)} className="card-tap"
+                  style={{background:flash?'#2d1010':C.card,borderRadius:12,padding:12,border:`1.5px solid ${flash?C.red:inCart?C.red+'66':p.stock<=p.minStock?C.orange+'55':C.border}`,cursor:'pointer',transition:'all 0.18s',boxShadow:flash?`0 0 16px ${C.red}44`:inCart?`0 0 8px ${C.red}22`:'none',userSelect:'none'}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{p.category}</div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6,lineHeight:1.3}}>{p.name}</div>
+                  <div style={{fontSize:16,fontWeight:900,color:C.red,fontFamily:"'Space Mono'"}}>{lkr(p.price)}</div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:5}}>
+                    <span style={{fontSize:10,color:p.stock<=p.minStock?C.orange:C.muted}}>Stk:{p.stock}</span>
+                    {inCart&&<span style={{background:C.red,color:'#fff',borderRadius:10,padding:'2px 7px',fontSize:10,fontWeight:700}}>×{inCart.qty}</span>}
+                  </div>
+                  {p.taxRate>0&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>+{p.taxRate}% Tax</div>}
+                </div>
+              );
+            })}
+            {!filtered.length&&(
+              <div className="anim-fadeIn" style={{gridColumn:'1/-1',textAlign:'center',color:C.muted,padding:48}}>
+                <Ic n="box" s={44} c={C.muted}/>
+                <p style={{marginTop:12,fontSize:13}}>{products.filter(p=>p.active).length===0?'No products yet — add them in Products tab':'No matches'}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CART VIEW */}
+      {/* SUPPLIER CATALOG TAB (POS) */}
+      {tab==='catalog'&&(
+        <div style={{flex:1,overflow:'auto',display:'flex',flexDirection:'column'}}>
+          <div style={{padding:'8px 10px 5px',background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+            <div style={{position:'relative',marginBottom:6}}>
+              <div style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)'}}><Ic n="srch" s={12} c={C.muted}/></div>
+              <input value={posSrch2} onChange={e=>setPosSrch2(e.target.value)} placeholder="Search catalog…"
+                style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'7px 10px 7px 27px',color:C.text,fontSize:12,fontFamily:"'Noto Sans JP'",outline:'none'}}
+                onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+            </div>
+            <div style={{display:'flex',gap:5,overflow:'auto',paddingBottom:2}}>
+              {SSUPS.map(s=>(
+                <button key={s} onClick={()=>{setPosSupFlt(s);setPosCatFlt('All');}} style={{background:posSupFlt===s?C.red:C.border,border:'none',borderRadius:14,padding:'3px 9px',color:'#fff',fontSize:9,cursor:'pointer',whiteSpace:'nowrap',fontWeight:posSupFlt===s?700:400,flexShrink:0,transition:'all 0.18s'}}>{s}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{flex:1,overflow:'auto',padding:'7px 10px'}}>
+            {SUPPLIER_CATALOG.filter(i=>{
+              const ms=posSupFlt==='All'||i.sup===posSupFlt;
+              const mc=posCatFlt==='All'||i.cat===posCatFlt;
+              const mq=!posSrch2||i.name.toLowerCase().includes(posSrch2.toLowerCase())||i.sup.toLowerCase().includes(posSrch2.toLowerCase());
+              return ms&&mc&&mq;
+            }).map((item,i)=>{
+              const inC=cart.find(c=>c.pid===item.id);
+              const supCol={'Kevilton':C.red,'ACL Cables':C.blue,'Kelani':C.orange,'Green Electric':C.green,'Dimo Lumin':'#B8860B'}[item.sup]||C.muted;
+              const addCatalogItem=()=>{
+                setCart(prev=>{
+                  const ex=prev.find(c=>c.pid===item.id);
+                  if(ex) return prev.map(c=>c.pid===item.id?{...c,qty:c.qty+1}:c);
+                  return [...prev,{pid:item.id,name:item.name,price:Math.ceil(item.cost*1.25/10)*10,qty:1,tax:0,sku:item.id}];
+                });
+                setBadgeK(k=>k+1);
+                toast2(item.name.slice(0,28)+' added ✓','success');
+              };
+              return (
+                <div key={item.id} style={{background:inC?'#1a1000':C.card,borderRadius:9,padding:'9px 11px',marginBottom:6,border:`1px solid ${inC?C.gold+'88':C.border}`,display:'flex',alignItems:'center',gap:8,animationDelay:`${Math.min(i,20)*0.025}s`}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:700,lineHeight:1.3,marginBottom:2}}>{item.name}</div>
+                    <div style={{display:'flex',gap:5,alignItems:'center'}}>
+                      <span style={{background:supCol+'22',color:supCol,border:`1px solid ${supCol}44`,borderRadius:3,padding:'1px 5px',fontSize:8,fontWeight:700}}>{item.sup}</span>
+                      <span style={{fontSize:10,color:C.muted}}>MRP: Rs.{item.cost.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <button onClick={addCatalogItem} style={{background:inC?C.gold:C.red,border:'none',borderRadius:7,width:32,height:32,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontWeight:900,color:'#fff',fontSize:16}}>
+                    {inC?inC.qty:'+'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab==='cart'&&(
+        <div style={{flex:1,overflow:'auto',display:'flex',flexDirection:'column'}}>
+          <div style={{flex:1,overflow:'auto',padding:12}}>
+            <Inp lbl="Customer Name" val={cust} set={setCust} ph="Customer name"/>
+            {!cart.length?(
+              <div className="anim-fadeIn" style={{textAlign:'center',color:C.muted,padding:40}}>
+                <Ic n="cart" s={44} c={C.muted}/>
+                <p style={{marginTop:12,fontSize:13}}>Cart empty — tap Products to add items</p>
+                <Btn ch="Browse Products" v="out" onClick={()=>setTab('grid')} st={{marginTop:16}}/>
+              </div>
+            ):cart.map((item,i)=>(
+              <div key={item.pid} className="anim-fadeUp" style={{background:C.card,borderRadius:12,padding:12,marginBottom:8,border:`1px solid ${C.border}`,animationDelay:`${i*0.04}s`}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                  <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700}}>{item.name}</div><div style={{fontSize:11,color:C.muted}}>{lkr(item.price)}{item.tax>0?` +${item.tax}% Tax`:''}</div></div>
+                  <button onClick={()=>rem(item.pid)} style={{background:'#3a1a1a',border:'none',borderRadius:6,padding:'5px 7px',cursor:'pointer'}}><Ic n="del" s={14} c={C.red}/></button>
+                </div>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <div style={{display:'flex',alignItems:'center',background:'#242424',borderRadius:10,overflow:'hidden'}}>
+                    <button onClick={()=>updQty(item.pid,-1)} style={{background:'none',border:'none',padding:'7px 13px',cursor:'pointer',color:C.red,fontSize:18,fontWeight:700,lineHeight:1}}>−</button>
+                    <span style={{fontFamily:"'Space Mono'",fontWeight:700,minWidth:24,textAlign:'center',fontSize:15}}>{item.qty}</span>
+                    <button onClick={()=>updQty(item.pid,1)} style={{background:'none',border:'none',padding:'7px 13px',cursor:'pointer',color:C.green,fontSize:18,fontWeight:700,lineHeight:1}}>+</button>
+                  </div>
+                  <div style={{fontFamily:"'Space Mono'",fontWeight:700,fontSize:14}}>{lkr(item.price*item.qty)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {cart.length>0&&(
+            <div style={{background:'#141414',padding:14,borderTop:`1px solid ${C.border}`}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{color:C.muted,fontSize:13}}>Subtotal</span><span style={{fontFamily:"'Space Mono'"}}>{lkr(sub)}</span></div>
+              {tax>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{color:C.muted,fontSize:13}}>Tax</span><span style={{fontFamily:"'Space Mono'"}}>{lkr(tax)}</span></div>}
+              <input value={disc} onChange={e=>setDisc(e.target.value)} placeholder="Discount (Rs.)" type="number" min="0"
+                style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:13,marginBottom:8,fontFamily:"'Noto Sans JP'",outline:'none'}}/>
+              <div style={{display:'flex',justifyContent:'space-between',borderTop:`1px solid ${C.border}`,paddingTop:8,marginBottom:10}}>
+                <span style={{fontWeight:700,fontSize:15}}>TOTAL</span>
+                <span style={{fontFamily:"'Space Mono'",fontWeight:900,fontSize:20,color:C.red}}>{lkr(total)}</span>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}}>
+                {['cash','card','upi','cheque'].map(m=>(
+                  <button key={m} onClick={()=>setPay(m)} style={{background:pay===m?C.red:C.border,border:'none',borderRadius:8,padding:'7px 2px',color:'#fff',fontSize:10,cursor:'pointer',fontWeight:pay===m?700:400,textTransform:'uppercase',transition:'all 0.18s',transform:pay===m?'scale(1.06)':'scale(1)'}}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {pay==='cash'&&(
+                <div style={{marginBottom:10}}>
+                  <input value={paid} onChange={e=>setPaid(e.target.value)} placeholder="Amount paid (Rs.)" type="number"
+                    style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:14,fontFamily:"'Noto Sans JP'",outline:'none',marginBottom:4}}/>
+                  {paid&&<div className="anim-fadeIn" style={{fontSize:12,color:chng>=0?C.green:C.red,fontWeight:700}}>Change: {lkr(Math.abs(chng))}{chng<0?' ⚠ Short':''}</div>}
+                </div>
+              )}
+              {pay==='cheque'&&(
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
+                  <input value={chqNo} onChange={e=>setChqNo(e.target.value)} placeholder="Cheque No."
+                    style={{background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none'}}/>
+                  <select value={chqBk} onChange={e=>setChqBk(e.target.value)}
+                    style={{background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:chqBk?C.text:C.muted,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none'}}>
+                    <option value="">Select Bank…</option>
+                    {SL_BANKS.map(b=><option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+              )}
+              <div style={{display:'flex',gap:8}}>
+                <Btn ch="Clear" v="dk" onClick={clearAll} st={{flex:1}}/>
+                <Btn ch={busy?<span style={{animation:'spin 0.6s linear infinite',display:'inline-block'}}>↻</span>:<><Ic n="ok" s={14} c="#fff"/>Checkout</>}
+                  onClick={checkout} dis={busy} st={{flex:2,background:C.green,border:'none',color:'#fff'}}/>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  BILL VIEW
+// ═══════════════════════════════════════════════════════════════════════
+function BillView({sale,onNewSale}) {
+  const printBill=()=>{
+    const el=document.getElementById('bill-print');
+    el.innerHTML=`<div style="text-align:center;margin-bottom:14px"><b style="font-size:16px">NIPPON ELECTRICALS</b><br/><small>Smart POS System</small><hr/></div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Invoice:</span><b>${sale.invoiceNo}</b></div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Date:</span><span>${sale.date}</span></div><div style="display:flex;justify-content:space-between;margin-bottom:12px"><span>Customer:</span><span>${sale.customer}</span></div><hr/>${sale.items.map(i=>`<div style="display:flex;justify-content:space-between;margin:4px 0"><span>${i.name} ×${i.qty}</span><span>Rs.${(i.price*i.qty).toFixed(2)}</span></div>`).join('')}<hr/><div style="display:flex;justify-content:space-between"><span>Subtotal</span><span>Rs.${sale.subtotal.toFixed(2)}</span></div>${sale.taxAmount>0?`<div style="display:flex;justify-content:space-between"><span>Tax</span><span>Rs.${sale.taxAmount.toFixed(2)}</span></div>`:''}<div style="display:flex;justify-content:space-between"><span>Discount</span><span>Rs.${sale.discount.toFixed(2)}</span></div><div style="display:flex;justify-content:space-between;font-size:16px;font-weight:bold;margin-top:8px"><span>TOTAL</span><span>Rs.${sale.total.toFixed(2)}</span></div><hr/><div style="display:flex;justify-content:space-between"><span>Payment</span><span>${sale.paymentMode.toUpperCase()}</span></div><div style="text-align:center;margin-top:16px;font-size:11px">Thank you for shopping with Nippon Electricals!<br/>No exchange / refund after 7 days.</div>`;
+    window.print();
+  };
+  return (
+    <div style={{maxWidth:420,margin:'0 auto',padding:'20px 14px',paddingBottom:90}}>
+      <div className="anim-popIn" style={{textAlign:'center',marginBottom:24}}>
+        <div style={{width:64,height:64,borderRadius:'50%',background:C.green+'22',border:`2px solid ${C.green}`,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 12px'}}>
+          <Ic n="ok" s={30} c={C.green}/>
+        </div>
+        <h2 style={{fontSize:18,fontWeight:900,color:C.green}}>Sale Complete!</h2>
+        <p style={{fontSize:12,color:C.muted,marginTop:4}}>{sale.invoiceNo}</p>
+      </div>
+      <Card st={{marginBottom:12,borderTop:`3px solid ${C.red}`}} ch={
+        <>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:12,paddingBottom:10,borderBottom:`1px solid ${C.border}`}}>
+            <span style={{fontSize:11,color:C.muted}}>Customer</span><span style={{fontWeight:700}}>{sale.customer}</span>
+          </div>
+          {sale.items.map((item,i)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+              <span style={{fontSize:13}}>{item.name} <span style={{color:C.muted}}>×{item.qty}</span></span>
+              <span style={{fontFamily:"'Space Mono'",fontSize:13}}>{lkr(item.price*item.qty)}</span>
+            </div>
+          ))}
+          <div style={{borderTop:`1px solid ${C.border}`,marginTop:10,paddingTop:10}}>
+            {sale.taxAmount>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:C.muted,marginBottom:4}}><span>Tax</span><span>{lkr(sale.taxAmount)}</span></div>}
+            {sale.discount>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:C.muted,marginBottom:4}}><span>Discount</span><span>−{lkr(sale.discount)}</span></div>}
+            <div style={{display:'flex',justifyContent:'space-between',fontWeight:900,fontSize:18,marginTop:6}}>
+              <span>TOTAL</span><span style={{fontFamily:"'Space Mono'",color:C.red}}>{lkr(sale.total)}</span>
+            </div>
+            {sale.paymentMode==='cash'&&sale.change>0&&(
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:13,color:C.green,marginTop:6}}>
+                <span>Change</span><span style={{fontFamily:"'Space Mono'"}}>{lkr(sale.change)}</span>
+              </div>
+            )}
+            <div style={{marginTop:10}}><Badge ch={sale.paymentMode.toUpperCase()} col={C.green}/></div>
+          </div>
+        </>
+      }/>
+      <div style={{display:'flex',gap:10}}>
+        <Btn ch={<><Ic n="print" s={14} c="#fff"/>Print Bill</>} onClick={printBill} st={{flex:1}}/>
+        <Btn ch={<><Ic n="add" s={14} c="#fff"/>New Bill</>} v="ok" onClick={onNewSale} st={{flex:1}}/>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PRODUCTS PAGE — FIXED
+// ═══════════════════════════════════════════════════════════════════════
+function ProductsPage() {
+  const {products,upsertProduct,deleteProduct,toast2,user,companies}=useApp();
+  const [srch,setSrch]     =useState('');
+  const [cat,setCat]       =useState('All');
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]         =useState(null);
+  const [pgTab,setPgTab]   =useState('mine');
+  const [supFlt,setSupFlt] =useState('All');
+  const [catFlt,setCatFlt] =useState('All');
+  const [catSrch,setCatSrch]=useState('');
+  const blank={name:'',sku:'',category:'Lighting',price:'',costPrice:'',stock:'',unit:'pcs',taxRate:'0',minStock:'10',barcode:'',active:true,supplierId:'',supplierName:''};
+  const [f,setF]=useState(blank);
+  const [saving,setSaving]=useState(false);
+
+  const cats=['All',...CATS];
+  const list=products.filter(p=>(cat==='All'||p.category===cat)&&(p.name.toLowerCase().includes(srch.toLowerCase())||String(p.sku||'').toLowerCase().includes(srch.toLowerCase())));
+
+  const openAdd=()=>{setEd(null);setF(blank);setShowForm(true);};
+  const openEdit=p=>{setEd(p);setF({...blank,...p,price:String(p.price||''),costPrice:String(p.costPrice||''),stock:String(p.stock||''),taxRate:String(p.taxRate||'0'),minStock:String(p.minStock||'10'),supplierId:String(p.supplierId||''),supplierName:p.supplierName||''});setShowForm(true);};
+  const openAddFromCatalog=ci=>{setEd(null);setF({...blank,name:ci.name,category:CATS.includes(ci.cat)?ci.cat:'Accessories',costPrice:String(ci.cost),price:String(Math.ceil(ci.cost*1.25/10)*10),unit:ci.unit,supplierName:ci.sup});setShowForm(true);setPgTab('mine');};
+
+  const chgSupplier=v=>{const co=companies.find(c=>String(c.id)===v);setF(p=>({...p,supplierId:v,supplierName:co?co.name:''}));};
+
+  const save=async()=>{
+    if(!f.name.trim()){toast2('Product name required!','error');return;}
+    if(!f.price||isNaN(parseFloat(f.price))){toast2('Valid sale price required!','error');return;}
+    if(!f.stock||isNaN(parseInt(f.stock))){toast2('Stock quantity required!','error');return;}
+    setSaving(true);
+    try{
+      const p={
+        ...f,
+        id:ed?ed.id:uid(),
+        name:f.name.trim(),
+        price:parseFloat(f.price),
+        costPrice:parseFloat(f.costPrice||0),
+        stock:parseInt(f.stock),
+        taxRate:parseFloat(f.taxRate||0),
+        minStock:parseInt(f.minStock||10),
+        supplierId:f.supplierId?parseInt(f.supplierId):null,
+        active:f.active!==false,
+      };
+      await upsertProduct(p);
+      toast2(ed?'Product updated!':'Product added!','success');
+      setShowForm(false);
+    }catch(e){toast2('Save failed: '+e.message,'error');}
+    setSaving(false);
+  };
+
+  const toggle=async p=>{await upsertProduct({...p,active:!p.active});toast2(p.active?'Deactivated':'Activated','info');};
+  const del=async id=>{if(confirm('Delete this product?')){await deleteProduct(id);toast2('Deleted','info');}};
+  const canEdit=user.role==='admin'||user.role==='manager';
+
+  const supColors2={'Kevilton':C.red,'ACL Cables':C.blue,'Kelani':C.orange,'Green Electric':C.green,'Dimo Lumin':'#B8860B'};
+  const CATS_FOR_SUP2=sup=>{const src=sup==='All'?SUPPLIER_CATALOG:SUPPLIER_CATALOG.filter(i=>i.sup===sup);return['All',...new Set(src.map(i=>i.cat))];};
+  const catFiltered=SUPPLIER_CATALOG.filter(i=>{
+    const ms=supFlt==='All'||i.sup===supFlt;
+    const mc=catFlt==='All'||i.cat===catFlt;
+    const mq=!catSrch||i.name.toLowerCase().includes(catSrch.toLowerCase())||i.sup.toLowerCase().includes(catSrch.toLowerCase());
+    return ms&&mc&&mq;
+  });
+
+  return (
+    <div style={{paddingBottom:90}}>
+      {/* Page tabs */}
+      <div style={{display:'flex',background:'#0f0f0f',borderBottom:`1px solid ${C.border}`}}>
+        {[['mine','box',`My Products (${products.length})`],['catalog','tag','Supplier Catalog']].map(([v,ic,lb])=>(
+          <button key={v} onClick={()=>setPgTab(v)} style={{flex:1,padding:'11px 4px',background:'none',border:'none',cursor:'pointer',color:pgTab===v?C.red:C.muted,fontWeight:pgTab===v?700:400,fontSize:12,borderBottom:pgTab===v?`2px solid ${C.red}`:'2px solid transparent',display:'flex',alignItems:'center',justifyContent:'center',gap:5,transition:'color 0.2s'}}>
+            <Ic n={ic} s={13} c={pgTab===v?C.red:C.muted}/>{lb}
+          </button>
+        ))}
+      </div>
+
+      {/* ── SUPPLIER CATALOG TAB ── */}
+      {pgTab==='catalog'&&(
+        <div>
+          <div style={{padding:'10px 12px 6px',background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+            <div style={{position:'relative',marginBottom:8}}>
+              <div style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)'}}><Ic n="srch" s={13} c={C.muted}/></div>
+              <input value={catSrch} onChange={e=>setCatSrch(e.target.value)} placeholder="Search supplier catalog…"
+                style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 10px 8px 28px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none'}}
+                onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+            </div>
+            <div style={{display:'flex',gap:5,overflow:'auto',paddingBottom:3}}>
+              {SSUPS.map(s=>(
+                <button key={s} onClick={()=>{setSupFlt(s);setCatFlt('All');}} style={{background:supFlt===s?C.red:C.border,border:'none',borderRadius:16,padding:'4px 11px',color:'#fff',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontWeight:supFlt===s?700:400,flexShrink:0,transition:'all 0.18s'}}>{s}</button>
+              ))}
+            </div>
+          </div>
+          {!catSrch&&<div style={{padding:'6px 12px',background:'#141414',borderBottom:`1px solid ${C.border}`,display:'flex',gap:5,overflow:'auto'}}>
+            {CATS_FOR_SUP2(supFlt).map(c=>(
+              <button key={c} onClick={()=>setCatFlt(c)} style={{background:catFlt===c?'#333':C.dark,border:`1px solid ${catFlt===c?C.muted:C.border}`,borderRadius:12,padding:'3px 10px',color:catFlt===c?C.text:C.muted,fontSize:10,cursor:'pointer',whiteSpace:'nowrap',transition:'all 0.18s',flexShrink:0}}>{c}</button>
+            ))}
+          </div>}
+          <div style={{padding:'6px 13px',fontSize:10,color:C.muted,background:'#141414',borderBottom:`1px solid ${C.border}`}}>{catFiltered.length} items {canEdit&&<>— tap <strong style={{color:C.green}}>+ Add</strong> to save to My Products</>}</div>
+          <div style={{padding:'8px 10px'}}>
+            {catFiltered.map((item,i)=>(
+              <div key={item.id} className="anim-fadeUp" style={{background:C.card,borderRadius:10,padding:'10px 12px',marginBottom:7,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',gap:10,animationDelay:`${Math.min(i,20)*0.03}s`}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:700,lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+                  <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                    <span style={{background:(supColors2[item.sup]||C.muted)+'22',color:supColors2[item.sup]||C.muted,border:`1px solid ${(supColors2[item.sup]||C.muted)}44`,borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700}}>{item.sup}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{item.cat}</span>
+                  </div>
+                  <div style={{fontSize:12,color:C.muted,marginTop:3}}>MRP: <span style={{fontFamily:"'Space Mono'",fontWeight:700,color:C.text}}>Rs.{item.cost.toLocaleString()}</span> / {item.unit}</div>
+                </div>
+                {canEdit&&<button onClick={()=>openAddFromCatalog(item)} style={{background:C.green,border:'none',borderRadius:8,padding:'6px 12px',cursor:'pointer',display:'flex',alignItems:'center',gap:5,color:'#fff',fontSize:11,fontWeight:700,flexShrink:0}}>
+                  <Ic n="add" s={12} c="#fff"/>Add
+                </button>}
+              </div>
+            ))}
+            {!catFiltered.length&&<div style={{textAlign:'center',color:C.muted,padding:40}}><Ic n="srch" s={44} c={C.muted}/><p style={{marginTop:12,fontSize:13}}>No items found</p></div>}
+          </div>
+        </div>
+      )}
+
+      {/* ── MY PRODUCTS TAB ── */}
+      {pgTab==='mine'&&<div style={{padding:14}}>
+      <SectionHeader title="My Products" right={<>
+        {canEdit&&<Btn ch={<><Ic n="add" s={14} c="#fff"/>Add</>} onClick={openAdd} sz="sm"/>}
+        <ExportMenu onXLSX={()=>exportProductsXLSX(products)} onPDF={()=>exportProductsPDF(products)}/>
+      </>}/>
+
+      <div style={{position:'relative',marginBottom:10}}>
+        <div style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)'}}><Ic n="srch" s={14} c={C.muted}/></div>
+        <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search name or SKU…"
+          style={{width:'100%',background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 10px 9px 32px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none',transition:'border 0.2s'}}
+          onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+      </div>
+      <div style={{display:'flex',gap:6,marginBottom:14,overflow:'auto',paddingBottom:3}}>
+        {cats.map(c=><button key={c} onClick={()=>setCat(c)} style={{background:cat===c?C.red:C.border,border:'none',borderRadius:16,padding:'5px 13px',color:'#fff',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontWeight:cat===c?700:400,transition:'all 0.18s'}}>{c}</button>)}
+      </div>
+
+      {list.length===0&&(
+        <div className="anim-fadeIn" style={{textAlign:'center',color:C.muted,padding:48}}>
+          <Ic n="box" s={44} c={C.muted}/>
+          <p style={{marginTop:12,fontSize:13}}>{products.length===0?'No products yet':'No matches'}</p>
+          {canEdit&&products.length===0&&<Btn ch="Add Your First Product" onClick={openAdd} st={{marginTop:16}}/>}
+        </div>
+      )}
+
+      {list.map((p,i)=>(
+        <div key={p.id} className="anim-fadeUp" style={{background:C.card,borderRadius:12,padding:13,marginBottom:8,border:`1px solid ${C.border}`,opacity:p.active?1:0.55,animationDelay:`${i*0.04}s`}}>
+          <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3,flexWrap:'wrap'}}>
+                <span style={{fontSize:13,fontWeight:700}}>{p.name}</span>
+                {!p.active&&<Badge ch="Inactive" col={C.muted}/>}
+                {p.stock<=(p.minStock||10)&&<Badge ch="Low Stock" col={C.orange}/>}
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{p.sku||'—'} · {p.category}</div>
+              <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <span style={{fontSize:14,fontWeight:900,color:C.red,fontFamily:"'Space Mono'"}}>{lkr(p.price)}</span>
+                <span style={{fontSize:11,color:C.muted}}>Cost:{lkr(p.costPrice)}</span>
+                <span style={{fontSize:11,color:p.stock<=(p.minStock||10)?C.orange:C.muted}}>Stk:{p.stock} {p.unit}</span>
+                {p.taxRate>0&&<Badge ch={p.taxRate+'% Tax'} col={C.blue}/>}
+              </div>
+              {p.supplierName&&<div style={{fontSize:11,color:C.muted,marginTop:4,display:'flex',alignItems:'center',gap:4}}><Ic n="bldg" s={11} c={C.muted}/>{p.supplierName}</div>}
+            </div>
+            {canEdit&&(
+              <div style={{display:'flex',flexDirection:'column',gap:5,flexShrink:0}}>
+                <button onClick={()=>openEdit(p)} style={{background:C.border,border:'none',borderRadius:6,padding:'6px 8px',cursor:'pointer',transition:'background 0.15s'}} onMouseEnter={e=>e.currentTarget.style.background='#333'} onMouseLeave={e=>e.currentTarget.style.background=C.border}><Ic n="edit" s={13}/></button>
+                <button onClick={()=>toggle(p)} style={{background:p.active?'#1a3a1a':'#3a1a1a',border:'none',borderRadius:6,padding:'6px 8px',cursor:'pointer'}}><Ic n={p.active?'eye':'eyeoff'} s={13} c={p.active?C.green:C.red}/></button>
+                <button onClick={()=>del(p.id)} style={{background:'#3a1a1a',border:'none',borderRadius:6,padding:'6px 8px',cursor:'pointer'}}><Ic n="del" s={13} c={C.red}/></button>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?'Edit Product':'Add Product'} ch={
+        <>
+          <Inp lbl="Product Name" val={f.name} set={v=>setF(p=>({...p,name:v}))} req/>
+          <Inp lbl="SKU / Item Code" val={f.sku} set={v=>setF(p=>({...p,sku:v}))} ph="NE-LT-001"/>
+          <Sel lbl="Category" val={f.category} set={v=>setF(p=>({...p,category:v}))} opts={CATS}/>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <Inp lbl="Sale Price (Rs.) *" val={f.price} set={v=>setF(p=>({...p,price:v}))} type="number" req/>
+            <Inp lbl="Cost Price (Rs.)" val={f.costPrice} set={v=>setF(p=>({...p,costPrice:v}))} type="number"/>
+            <Inp lbl="Stock Qty *" val={f.stock} set={v=>setF(p=>({...p,stock:v}))} type="number" req/>
+            <Inp lbl="Min Stock Alert" val={f.minStock} set={v=>setF(p=>({...p,minStock:v}))} type="number"/>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <Sel lbl="Unit" val={f.unit} set={v=>setF(p=>({...p,unit:v}))} opts={['pcs','roll','box','kg','meter','set','pair']}/>
+            <Inp lbl="Tax %" val={f.taxRate} set={v=>setF(p=>({...p,taxRate:v}))} type="number"/>
+          </div>
+          <Inp lbl="Barcode" val={f.barcode} set={v=>setF(p=>({...p,barcode:v}))}/>
+          {companies.length>0&&(
+            <Sel lbl="Supplier / Company" val={f.supplierId} set={chgSupplier}
+              opts={[{v:'',l:'— No Supplier —'},...companies.map(c=>({v:String(c.id),l:c.name+' ('+c.type+')'}))]}/>
+          )}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13,padding:'10px 13px',background:'#242424',borderRadius:8}}>
+            <span style={{fontSize:13}}>Active (visible in POS)</span>
+            <button onClick={()=>setF(p=>({...p,active:!p.active}))} style={{background:f.active?C.green:C.border,border:'none',borderRadius:12,width:44,height:24,cursor:'pointer',position:'relative',transition:'background 0.2s'}}>
+              <div style={{width:18,height:18,borderRadius:'50%',background:'#fff',position:'absolute',top:3,left:f.active?23:3,transition:'left 0.2s'}}/>
+            </button>
+          </div>
+          <Btn ch={saving?'Saving…':(ed?'Update Product':'Add Product')} onClick={save} dis={saving} full sz="lg"/>
+        </>
+      }/>
+      </div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CHEQUES PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function ChequesPage() {
+  const {cheques,upsertCheque,deleteCheque,toast2}=useApp();
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const [flt,setFlt]=useState('all');
+  const [catFlt,setCatFlt]=useState('all');
+  const [viewImg,setViewImg]=useState(null);
+  const blank={category:'received',customerName:'',companyName:'',chequeNo:'',bank:'',branch:'',amount:'',chequeDate:today(),dueDate:'',givenDate:today(),billNumber:'',invoiceRef:'',isReturn:false,returnReason:'',chequeImage:null,status:'pending',notes:''};
+  const [f,setF]=useState(blank);
+  const [imgLoading,setImgLoading]=useState(false);
+
+  let list=[...cheques];
+  if(catFlt!=='all') list=list.filter(c=>c.category===catFlt);
+  if(flt!=='all') list=list.filter(c=>c.status===flt);
+  list.sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0));
+
+  const pendAmt=cheques.filter(c=>c.status==='pending'&&c.category==='received').reduce((a,c)=>a+c.amount,0);
+  const givenAmt=cheques.filter(c=>c.status==='pending'&&c.category==='given').reduce((a,c)=>a+c.amount,0);
+
+  const openForm=(c=null)=>{if(c){setEd(c);setF({...blank,...c,amount:String(c.amount)});}else{setEd(null);setF(blank);}setShowForm(true);};
+  const handleImg=async e=>{const file=e.target.files[0];if(!file)return;setImgLoading(true);try{const img=await compressImg(file);setF(p=>({...p,chequeImage:img}));}catch(e){toast2('Image load failed','error');}setImgLoading(false);};
+  const save=async()=>{
+    if(!f.chequeNo||!f.bank||!f.amount){toast2('Fill required fields!','error');return;}
+    if(f.category==='received'&&!f.customerName){toast2('Customer name required!','error');return;}
+    if(f.category==='given'&&!f.companyName){toast2('Company name required!','error');return;}
+    const c={...f,amount:parseFloat(f.amount),id:ed?ed.id:uid(),createdAt:ed?ed.createdAt:new Date().toISOString(),clearedDate:f.status==='cleared'?(ed?.clearedDate||today()):null};
+    await upsertCheque(c);toast2(ed?'Updated!':'Added!','success');setShowForm(false);
+  };
+  const setStatus=async(c,status)=>{await upsertCheque({...c,status,clearedDate:status==='cleared'?today():c.clearedDate});toast2('Marked as '+status,'success');};
+  const del=async id=>{if(confirm('Delete?')){await deleteCheque(id);toast2('Deleted','info');}};
+
+  const sc={pending:C.orange,cleared:C.green,bounced:C.red,returned:C.red};
+  const cc={received:C.green,given:C.blue,return:C.orange};
+  const catLabel={received:'Customer Received',given:'Company/Dealer Given',return:'Return Cheque'};
+
+  return (
+    <div style={{padding:14,paddingBottom:90}}>
+      <SectionHeader title="Cheques" right={<>
+        <Btn ch={<><Ic n="add" s={14} c="#fff"/>Add</>} onClick={()=>openForm()} sz="sm"/>
+        <ExportMenu onXLSX={()=>exportChequesXLSX(cheques)} onPDF={()=>exportChequesPDF(cheques)}/>
+      </>}/>
+      <div style={{display:'flex',gap:10,marginBottom:14}}>
+        <StatBox lbl="Pending Received" val={lkrK(pendAmt)} col={C.green} icon="chq"/>
+        <StatBox lbl="Pending Given" val={lkrK(givenAmt)} col={C.blue} icon="chq"/>
+      </div>
+      <div style={{display:'flex',gap:6,marginBottom:8,overflow:'auto'}}>
+        {[['all','All Types'],['received','Received'],['given','Given'],['return','Return']].map(([v,l])=>(
+          <button key={v} onClick={()=>setCatFlt(v)} style={{background:catFlt===v?C.red:C.border,border:'none',borderRadius:16,padding:'4px 12px',color:'#fff',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontWeight:catFlt===v?700:400,transition:'all 0.18s'}}>{l}</button>
+        ))}
+      </div>
+      <div style={{display:'flex',gap:6,marginBottom:14,overflow:'auto'}}>
+        {[['all','All'],['pending','Pending'],['cleared','Cleared'],['bounced','Bounced'],['returned','Returned']].map(([v,l])=>(
+          <button key={v} onClick={()=>setFlt(v)} style={{background:flt===v?C.border:C.dark,border:`1px solid ${flt===v?C.muted:C.border}`,borderRadius:16,padding:'3px 10px',color:flt===v?C.text:C.muted,fontSize:10,cursor:'pointer',whiteSpace:'nowrap',transition:'all 0.18s'}}>{l}</button>
+        ))}
+      </div>
+
+      {list.map((c,i)=>(
+        <div key={c.id} className="anim-fadeUp" style={{background:C.card,borderRadius:12,padding:13,marginBottom:12,border:`1px solid ${C.border}`,borderLeft:`3px solid ${cc[c.category]||C.muted}`,animationDelay:`${i*0.04}s`}}>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:4}}><Badge ch={catLabel[c.category]} col={cc[c.category]}/><Badge ch={c.status} col={sc[c.status]}/></div>
+              <div style={{fontSize:14,fontWeight:700}}>{c.customerName||c.companyName}</div>
+              <div style={{fontSize:11,color:C.muted}}>CHQ# {c.chequeNo} · {c.bank}</div>
+            </div>
+            <div style={{fontSize:16,fontWeight:900,color:c.category==='received'?C.green:C.blue,fontFamily:"'Space Mono'",textAlign:'right',flexShrink:0}}>{lkr(c.amount)}</div>
+          </div>
+          <div style={{background:'#242424',borderRadius:8,padding:'8px 10px',marginBottom:10,fontSize:11,display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+            <div><span style={{color:C.muted}}>Cheque Date: </span><strong>{c.chequeDate}</strong></div>
+            {c.dueDate&&<div><span style={{color:C.muted}}>Due: </span><strong style={{color:C.orange}}>{c.dueDate}</strong></div>}
+            {c.billNumber&&<div><span style={{color:C.muted}}>Bill No: </span><strong>{c.billNumber}</strong></div>}
+            {c.returnReason&&<div style={{gridColumn:'1/-1'}}><span style={{color:C.muted}}>Reason: </span><strong style={{color:C.red}}>{c.returnReason}</strong></div>}
+          </div>
+          {c.chequeImage&&<button onClick={()=>setViewImg(c.chequeImage)} style={{background:'none',border:`1px solid ${C.border}`,borderRadius:8,padding:'6px 12px',color:C.muted,cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',gap:6,marginBottom:10}}><Ic n="img" s={14} c={C.muted}/>View Image</button>}
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {c.status==='pending'&&<Btn ch={<><Ic n="ok" s={12} c="#fff"/>Cleared</>} v="ok" sz="sm" onClick={()=>setStatus(c,'cleared')}/>}
+            {c.status==='pending'&&<Btn ch="Bounced" sz="sm" st={{background:'#3a1a1a',color:C.red,border:'none'}} onClick={()=>setStatus(c,'bounced')}/>}
+            <Btn ch={<><Ic n="edit" s={12}/>Edit</>} v="dk" sz="sm" onClick={()=>openForm(c)}/>
+            <Btn ch={<><Ic n="del" s={12} c={C.red}/></>} sz="sm" st={{background:'#3a1a1a',border:'none'}} onClick={()=>del(c.id)}/>
+          </div>
+        </div>
+      ))}
+      {list.length===0&&<div className="anim-fadeIn" style={{textAlign:'center',color:C.muted,padding:40}}><Ic n="chq" s={44} c={C.muted}/><p style={{marginTop:12}}>No cheques found</p></div>}
+
+      {viewImg&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.95)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={()=>setViewImg(null)}>
+          <img src={viewImg} style={{maxWidth:'100%',maxHeight:'90vh',borderRadius:8}} alt="Cheque"/>
+          <button onClick={()=>setViewImg(null)} style={{position:'absolute',top:20,right:20,background:C.red,border:'none',borderRadius:'50%',width:36,height:36,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Ic n="x" s={18} c="#fff"/></button>
+        </div>
+      )}
+
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?'Edit Cheque':'Add Cheque'} ch={
+        <div>
+          <div style={{marginBottom:16}}>
+            <label style={{display:'block',fontSize:11,color:C.muted,marginBottom:8,letterSpacing:0.5,textTransform:'uppercase'}}>Category *</label>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+              {[['received','Customer\nReceived',C.green],['given','Company\nGiven',C.blue],['return','Return\nCheque',C.orange]].map(([v,l,col])=>(
+                <button key={v} onClick={()=>setF(p=>({...p,category:v}))} style={{background:f.category===v?col+'33':C.border,border:`2px solid ${f.category===v?col:C.border}`,borderRadius:8,padding:'10px 4px',cursor:'pointer',color:f.category===v?col:C.muted,fontSize:11,fontWeight:700,lineHeight:1.4,whiteSpace:'pre-line',transition:'all 0.18s'}}>{l}</button>
+              ))}
+            </div>
+          </div>
+          {f.category==='received'&&<Inp lbl="Customer Name" val={f.customerName} set={v=>setF(p=>({...p,customerName:v}))} req/>}
+          {f.category==='given'&&<Inp lbl="Company / Dealer Name" val={f.companyName} set={v=>setF(p=>({...p,companyName:v}))} req/>}
+          {f.category==='return'&&<Inp lbl="Party Name" val={f.customerName} set={v=>setF(p=>({...p,customerName:v}))} req/>}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <Inp lbl="Cheque No. *" val={f.chequeNo} set={v=>setF(p=>({...p,chequeNo:v}))}/>
+            <Inp lbl="Amount (Rs.) *" val={f.amount} set={v=>setF(p=>({...p,amount:v}))} type="number"/>
+          </div>
+          <Sel lbl="Bank *" val={f.bank} set={v=>setF(p=>({...p,bank:v}))} opts={[{v:'',l:'Select Bank…'},...SL_BANKS.map(b=>({v:b,l:b}))]}/>
+          <Inp lbl="Branch" val={f.branch} set={v=>setF(p=>({...p,branch:v}))}/>
+          <Inp lbl="Cheque Date *" val={f.chequeDate} set={v=>setF(p=>({...p,chequeDate:v}))} type="date"/>
+          {f.category==='received'&&<Inp lbl="Due Date" val={f.dueDate} set={v=>setF(p=>({...p,dueDate:v}))} type="date"/>}
+          {f.category==='given'&&<><Inp lbl="Bill Number" val={f.billNumber} set={v=>setF(p=>({...p,billNumber:v}))}/><div style={{marginBottom:13}}><label style={{display:'block',fontSize:11,color:C.muted,marginBottom:5,letterSpacing:0.5,textTransform:'uppercase'}}>Cheque Image</label><input type="file" accept="image/*" onChange={handleImg}/>{imgLoading&&<p style={{fontSize:11,color:C.muted,marginTop:4}}>Compressing…</p>}{f.chequeImage&&<img src={f.chequeImage} style={{maxWidth:140,maxHeight:80,borderRadius:6,marginTop:8,border:`1px solid ${C.border}`}} alt="preview"/>}</div></>}
+          {f.category==='return'&&<Inp lbl="Return Reason" val={f.returnReason} set={v=>setF(p=>({...p,returnReason:v}))}/>}
+          <Sel lbl="Status" val={f.status} set={v=>setF(p=>({...p,status:v}))} opts={[{v:'pending',l:'Pending'},{v:'cleared',l:'Cleared'},{v:'bounced',l:'Bounced'},{v:'returned',l:'Returned'}]}/>
+          <Inp lbl="Invoice/Bill Reference" val={f.invoiceRef} set={v=>setF(p=>({...p,invoiceRef:v}))}/>
+          <Textarea lbl="Notes" val={f.notes} set={v=>setF(p=>({...p,notes:v}))}/>
+          <Btn ch={ed?'Update Cheque':'Add Cheque'} onClick={save} full sz="lg"/>
+        </div>
+      }/>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  COMPANIES PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function CompanyForm({f,setF,types,onSave}) {
+  return <>
+    <Inp lbl="Company Name *" val={f.name} set={v=>setF(p=>({...p,name:v}))} req/>
+    <Sel lbl="Type" val={f.type} set={v=>setF(p=>({...p,type:v}))} opts={types}/>
+    <Inp lbl="Contact Person" val={f.contactPerson} set={v=>setF(p=>({...p,contactPerson:v}))}/>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+      <Inp lbl="Phone" val={f.phone} set={v=>setF(p=>({...p,phone:v}))} type="tel"/>
+      <Inp lbl="Email" val={f.email} set={v=>setF(p=>({...p,email:v}))} type="email"/>
+    </div>
+    <Inp lbl="Address" val={f.address} set={v=>setF(p=>({...p,address:v}))}/>
+    <Inp lbl="Website" val={f.website} set={v=>setF(p=>({...p,website:v}))}/>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+      <Inp lbl="Payment Terms" val={f.paymentTerms} set={v=>setF(p=>({...p,paymentTerms:v}))} ph="30 days"/>
+      <Inp lbl="Tax / VAT No" val={f.taxNo} set={v=>setF(p=>({...p,taxNo:v}))}/>
+    </div>
+    <Textarea lbl="Notes" val={f.notes} set={v=>setF(p=>({...p,notes:v}))}/>
+    <Btn ch={f.id?'Update Company':'Add Company'} onClick={onSave} full sz="lg"/>
+  </>;
+}
+
+function CompaniesPage() {
+  const {companies,products,upsertCompany,deleteCompany,upsertProduct,toast2,user}=useApp();
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const [detailCo,setDetailCo]=useState(null);
+  const [tab,setTab]=useState('info');
+  const [srch,setSrch]=useState('');
+  const [editPriceId,setEditPriceId]=useState(null);
+  const [tmpPrice,setTmpPrice]=useState({cost:'',sale:''});
+  const blank={name:'',type:'Supplier',contactPerson:'',phone:'',email:'',address:'',website:'',paymentTerms:'30 days',taxNo:'',notes:'',active:true};
+  const [f,setF]=useState(blank);
+  const types=['Supplier','Dealer','Manufacturer','Distributor','Importer'];
+  const tc={Supplier:C.green,Dealer:C.blue,Manufacturer:C.orange,Distributor:C.purple,Importer:C.gold};
+  const filtered=companies.filter(c=>c.name.toLowerCase().includes(srch.toLowerCase())||(c.contactPerson||'').toLowerCase().includes(srch.toLowerCase()));
+  const coProd=co=>products.filter(p=>p.supplierId===co.id);
+  const openForm=(c=null)=>{if(c){setEd(c);setF({...blank,...c});}else{setEd(null);setF(blank);}setShowForm(true);};
+  const save=async()=>{if(!f.name.trim()){toast2('Name required!','error');return;}const c={...f,id:ed?ed.id:uid(),createdAt:ed?ed.createdAt:today()};await upsertCompany(c);toast2(ed?'Updated!':'Added!','success');setShowForm(false);if(detailCo&&ed&&detailCo.id===ed.id)setDetailCo(c);};
+  const del=async id=>{const lp=products.filter(p=>p.supplierId===id);if(lp.length>0){toast2(lp.length+' products linked — unlink first!','error');return;}if(confirm('Delete?')){await deleteCompany(id);toast2('Deleted','info');setDetailCo(null);}};
+  const toggle=async c=>{await upsertCompany({...c,active:!c.active});};
+  const canEdit=user.role==='admin'||user.role==='manager';
+  const margin=p=>p.costPrice>0?((p.price-p.costPrice)/p.costPrice*100).toFixed(0)+'%':'—';
+  const marginCol=p=>{if(!p.costPrice)return C.muted;const m=(p.price-p.costPrice)/p.costPrice*100;return m>=30?C.green:m>=15?C.gold:C.red;};
+  const startEditPrice=p=>{setEditPriceId(p.id);setTmpPrice({cost:String(p.costPrice),sale:String(p.price)});};
+  const savePrice=async p=>{await upsertProduct({...p,costPrice:parseFloat(tmpPrice.cost)||p.costPrice,price:parseFloat(tmpPrice.sale)||p.price});setEditPriceId(null);toast2('Price updated!','success');};
+
+  if(detailCo){
+    const co=companies.find(c=>c.id===detailCo.id)||detailCo;
+    const prods=coProd(co);
+    return (
+      <div style={{paddingBottom:90}}>
+        <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:'14px 16px',display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={()=>setDetailCo(null)} style={{background:'none',border:'none',cursor:'pointer',padding:4}}><Ic n="back" s={22} c={C.muted}/></button>
+          <div style={{flex:1}}><div style={{fontWeight:900,fontSize:16}}>{co.name}</div><div style={{fontSize:11,color:C.muted}}>{co.type}</div></div>
+          {canEdit&&<Btn ch={<><Ic n="edit" s={13}/>Edit</>} v="dk" sz="sm" onClick={()=>openForm(co)}/>}
+        </div>
+        <div style={{display:'flex',background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+          {[['info','Info'],['products','Products ('+prods.length+')'],['prices','Prices']].map(([t,l])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:'11px 4px',background:'none',border:'none',cursor:'pointer',color:tab===t?C.red:C.muted,fontWeight:tab===t?700:400,fontSize:12,borderBottom:tab===t?`2px solid ${C.red}`:'2px solid transparent',transition:'color 0.2s'}}>{l}</button>
+          ))}
+        </div>
+        {tab==='info'&&(
+          <div style={{padding:'14px 14px'}}>
+            <div style={{display:'flex',gap:10,marginBottom:18}}><StatBox lbl="Products" val={prods.length} col={C.blue} icon="box"/><StatBox lbl="Stock Value" val={lkrK(prods.reduce((a,p)=>a+p.costPrice*p.stock,0))} col={C.green} icon="coin"/></div>
+            <Card ch={<div style={{display:'grid',gap:12}}>{[['Contact',co.contactPerson,'users'],['Phone',co.phone,'phone'],['Email',co.email,'srch'],['Address',co.address,'bldg'],['Website',co.website,'link'],['Payment Terms',co.paymentTerms,'coin'],['Tax / VAT',co.taxNo,'tag']].filter(([,v])=>v).map(([l,v,ic])=>(
+              <div key={l} style={{display:'flex',gap:10}}><Ic n={ic} s={14} c={C.muted}/><div><div style={{fontSize:10,color:C.muted,textTransform:'uppercase',letterSpacing:0.5}}>{l}</div><div style={{fontSize:13}}>{v}</div></div></div>
+            ))}</div>}/>
+            {canEdit&&<div style={{marginTop:16,display:'flex',gap:10}}>
+              <Btn ch={co.active?'Deactivate':'Activate'} v="dk" onClick={()=>toggle(co)} st={{flex:1}}/>
+              <Btn ch="Delete" st={{flex:1,background:'#3a1a1a',color:C.red,border:'none'}} onClick={()=>del(co.id)}/>
+            </div>}
+          </div>
+        )}
+        {tab==='products'&&(
+          <div style={{padding:'14px 14px',paddingBottom:90}}>
+            {prods.length===0?<div style={{textAlign:'center',color:C.muted,padding:40}}><Ic n="box" s={40} c={C.muted}/><p style={{marginTop:12}}>No products linked</p></div>:prods.map(p=>(
+              <Card key={p.id} st={{marginBottom:8}} ch={<div><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{p.name}</div><div style={{fontSize:11,color:C.muted,marginBottom:6}}>{p.sku} · {p.category}</div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}><div><div style={{fontSize:9,color:C.muted,letterSpacing:0.5}}>SALE</div><div style={{fontFamily:"'Space Mono'",fontWeight:700,color:C.red,fontSize:12}}>{lkr(p.price)}</div></div><div><div style={{fontSize:9,color:C.muted,letterSpacing:0.5}}>COST</div><div style={{fontFamily:"'Space Mono'",fontWeight:700,color:C.green,fontSize:12}}>{lkr(p.costPrice)}</div></div><div><div style={{fontSize:9,color:C.muted,letterSpacing:0.5}}>MARGIN</div><div style={{fontFamily:"'Space Mono'",fontWeight:700,color:marginCol(p),fontSize:12}}>{margin(p)}</div></div></div></div>}/>
+            ))}
+          </div>
+        )}
+        {tab==='prices'&&(
+          <div style={{padding:'14px 14px',paddingBottom:90}}>
+            {prods.length===0?<div style={{textAlign:'center',color:C.muted,padding:40}}>No products linked</div>:prods.map(p=>(
+              <Card key={p.id} st={{marginBottom:10,borderLeft:`3px solid ${editPriceId===p.id?C.gold:C.border}`}} ch={<>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
+                  <div><div style={{fontWeight:700,fontSize:13}}>{p.name}</div><div style={{fontSize:11,color:C.muted}}>{p.sku}</div></div>
+                  {canEdit&&(editPriceId===p.id?<div style={{display:'flex',gap:6}}><Btn ch="Save" v="ok" sz="sm" onClick={()=>savePrice(p)}/><Btn ch="Cancel" v="ghost" sz="sm" onClick={()=>setEditPriceId(null)}/></div>:<Btn ch="Edit Prices" v="dk" sz="sm" onClick={()=>startEditPrice(p)}/>)}
+                </div>
+                {editPriceId===p.id?(
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                    <div><label style={{display:'block',fontSize:10,color:C.muted,marginBottom:5,textTransform:'uppercase',letterSpacing:0.5}}>Cost (Rs.)</label><input value={tmpPrice.cost} onChange={e=>setTmpPrice(p=>({...p,cost:e.target.value}))} type="number" style={{width:'100%',background:'#242424',border:`1.5px solid ${C.gold}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:15,fontFamily:"'Space Mono'",fontWeight:700,outline:'none'}}/></div>
+                    <div><label style={{display:'block',fontSize:10,color:C.muted,marginBottom:5,textTransform:'uppercase',letterSpacing:0.5}}>Sale (Rs.)</label><input value={tmpPrice.sale} onChange={e=>setTmpPrice(p=>({...p,sale:e.target.value}))} type="number" style={{width:'100%',background:'#242424',border:`1.5px solid ${C.red}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:15,fontFamily:"'Space Mono'",fontWeight:700,outline:'none'}}/></div>
+                    {tmpPrice.cost&&tmpPrice.sale&&<div style={{gridColumn:'1/-1',background:'#1a1a00',borderRadius:8,padding:'8px 12px',fontSize:12}}><span style={{color:C.muted}}>Margin: </span><strong style={{color:((parseFloat(tmpPrice.sale)-parseFloat(tmpPrice.cost))/parseFloat(tmpPrice.cost)*100)>=20?C.green:C.orange}}>Rs.{(parseFloat(tmpPrice.sale)-parseFloat(tmpPrice.cost)).toFixed(2)} ({((parseFloat(tmpPrice.sale)-parseFloat(tmpPrice.cost))/parseFloat(tmpPrice.cost)*100).toFixed(1)}%)</strong></div>}
+                  </div>
+                ):(
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                    {[['Cost',lkr(p.costPrice),C.green],['Sale',lkr(p.price),C.red],['Margin',margin(p),marginCol(p)]].map(([l,v,col])=>(
+                      <div key={l} style={{background:'#242424',borderRadius:8,padding:'8px 10px',textAlign:'center'}}><div style={{fontSize:9,color:C.muted,textTransform:'uppercase',letterSpacing:0.5,marginBottom:3}}>{l}</div><div style={{fontFamily:"'Space Mono'",fontWeight:700,fontSize:12,color:col}}>{v}</div></div>
+                    ))}
+                  </div>
+                )}
+              </>}/>
+            ))}
+          </div>
+        )}
+        <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?'Edit Company':'Add Company'} ch={<CompanyForm f={f} setF={setF} types={types} onSave={save}/>}/>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:14,paddingBottom:90}}>
+      <SectionHeader title="Companies" right={<>
+        {canEdit&&<Btn ch={<><Ic n="add" s={14} c="#fff"/>Add</>} onClick={()=>openForm()} sz="sm"/>}
+        <ExportMenu onXLSX={()=>exportCompaniesXLSX(companies,products)} onPDF={()=>exportCompaniesPDF(companies,products)}/>
+      </>}/>
+      <div style={{position:'relative',marginBottom:14}}>
+        <div style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)'}}><Ic n="srch" s={14} c={C.muted}/></div>
+        <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search companies…" style={{width:'100%',background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 10px 9px 32px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none'}} onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+      </div>
+      {filtered.length===0&&<div className="anim-fadeIn" style={{textAlign:'center',color:C.muted,padding:48}}><Ic n="bldg" s={44} c={C.muted}/><p style={{marginTop:12,fontSize:13}}>{companies.length===0?'No companies yet':'No matches'}</p>{canEdit&&companies.length===0&&<Btn ch="Add Company" onClick={()=>openForm()} st={{marginTop:16}}/>}</div>}
+      {filtered.map((c,i)=>(
+        <div key={c.id} className="anim-fadeUp" onClick={()=>{setDetailCo(c);setTab('info');}} style={{background:C.card,borderRadius:12,padding:13,marginBottom:10,border:`1px solid ${C.border}`,borderLeft:`3px solid ${tc[c.type]||C.muted}`,cursor:'pointer',opacity:c.active?1:0.6,animationDelay:`${i*0.04}s`,transition:'transform 0.14s,background 0.14s'}} onMouseEnter={e=>e.currentTarget.style.background='#202020'} onMouseLeave={e=>e.currentTarget.style.background=C.card}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',gap:7,alignItems:'center',marginBottom:3,flexWrap:'wrap'}}>
+                <span style={{fontSize:14,fontWeight:700}}>{c.name}</span>
+                <Badge ch={c.type} col={tc[c.type]||C.muted}/>
+                {!c.active&&<Badge ch="Inactive" col={C.muted}/>}
+              </div>
+              <div style={{fontSize:11,color:C.muted}}>{c.contactPerson||'—'} · {c.phone||'—'}</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:2}}>{coProd(c).length} products linked</div>
+            </div>
+            <Ic n="back" s={16} c={C.muted} style={{transform:'rotate(180deg)',flexShrink:0}}/>
+          </div>
+        </div>
+      ))}
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?'Edit Company':'Add Company'} ch={<CompanyForm f={f} setF={setF} types={types} onSave={save}/>}/>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ACCOUNTS
+// ═══════════════════════════════════════════════════════════════════════
+function AccountsPage() {
+  const {users,upsertUser,toast2,user:me,sales,reconfigure}=useApp();
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const blank={name:'',username:'',password:'',role:'cashier',email:'',active:true};
+  const [f,setF]=useState(blank);
+  const openForm=(u=null)=>{if(u){setEd(u);setF({...u,password:''});}else{setEd(null);setF(blank);}setShowForm(true);};
+  const save=async()=>{
+    if(!f.name||!f.username||(!ed&&!f.password)){toast2('Fill required fields!','error');return;}
+    if(!ed&&users.find(u=>u.username===f.username)){toast2('Username already exists!','error');return;}
+    const u={...f,avatar:f.name[0]?.toUpperCase()||'U',password:f.password||(ed?.password||''),id:ed?ed.id:uid(),createdAt:ed?ed.createdAt:today()};
+    await upsertUser(u);toast2(ed?'Updated!':'User added!','success');setShowForm(false);
+  };
+  const toggle=async u=>{if(u.id===me.id){toast2("Can't deactivate yourself!",'error');return;}await upsertUser({...u,active:!u.active});};
+  const rc={admin:C.red,manager:C.blue,cashier:C.green};
+
+  return (
+    <div style={{padding:14,paddingBottom:90}}>
+      <SectionHeader title="User Accounts" right={<Btn ch={<><Ic n="add" s={14} c="#fff"/>Add User</>} onClick={()=>openForm()} sz="sm"/>}/>
+      <div style={{display:'flex',gap:10,marginBottom:18}}>
+        <StatBox lbl="Total Users" val={users.length} col={C.red} icon="users"/>
+        <StatBox lbl="Active" val={users.filter(u=>u.active).length} col={C.green} icon="ok"/>
+      </div>
+      {users.map((u,i)=>{
+        const uS=sales.filter(s=>s.cashier===u.username);
+        return (
+          <div key={u.id} className="anim-fadeUp" style={{background:C.card,borderRadius:12,padding:13,marginBottom:10,border:`1px solid ${C.border}`,opacity:u.active?1:0.6,animationDelay:`${i*0.04}s`}}>
+            <div style={{display:'flex',gap:12,alignItems:'center'}}>
+              <div style={{width:46,height:46,borderRadius:12,background:rc[u.role]+'33',border:`2px solid ${rc[u.role]}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:900,color:rc[u.role],flexShrink:0}}>{u.avatar}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap',marginBottom:2}}>
+                  <span style={{fontWeight:700,fontSize:14}}>{u.name}</span>
+                  {!u.active&&<Badge ch="Inactive" col={C.muted}/>}
+                  {u.id===me.id&&<Badge ch="You" col={C.gold}/>}
+                </div>
+                <div style={{fontSize:11,color:C.muted}}>@{u.username}</div>
+                <div style={{display:'flex',gap:6,marginTop:4,flexWrap:'wrap',alignItems:'center'}}><Badge ch={u.role} col={rc[u.role]}/>{uS.length>0&&<span style={{fontSize:10,color:C.muted}}>{uS.length} sales · {lkr(uS.reduce((a,s)=>a+s.total,0))}</span>}</div>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:5,flexShrink:0}}>
+                <button onClick={()=>openForm(u)} style={{background:C.border,border:'none',borderRadius:6,padding:'6px 8px',cursor:'pointer'}}><Ic n="edit" s={13}/></button>
+                <button onClick={()=>toggle(u)} style={{background:u.active?'#1a3a1a':'#3a1a1a',border:'none',borderRadius:6,padding:'6px 8px',cursor:'pointer'}}><Ic n={u.active?'eye':'eyeoff'} s={13} c={u.active?C.green:C.red}/></button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?'Edit User':'Add User'} ch={<>
+        <Inp lbl="Full Name *" val={f.name} set={v=>setF(p=>({...p,name:v}))} req/>
+        <Inp lbl="Username *" val={f.username} set={v=>setF(p=>({...p,username:v}))} req dis={!!ed}/>
+        <Inp lbl={ed?'New Password (blank = keep)':'Password *'} val={f.password} set={v=>setF(p=>({...p,password:v}))} type="password" req={!ed}/>
+        <Inp lbl="Email" val={f.email} set={v=>setF(p=>({...p,email:v}))} type="email"/>
+        <Sel lbl="Role" val={f.role} set={v=>setF(p=>({...p,role:v}))} opts={[{v:'admin',l:'Admin — Full Access'},{v:'manager',l:'Manager'},{v:'cashier',l:'Cashier — POS Only'}]}/>
+        <Btn ch={ed?'Update User':'Add User'} onClick={save} full sz="lg"/>
+      </>}/>
+      {me.role==='admin'&&(
+        <div style={{marginTop:24,borderTop:`1px solid ${C.border}`,paddingTop:18}}>
+          <p style={{fontSize:11,color:C.muted,marginBottom:4,fontWeight:700}}>⚙️ Database Settings</p>
+          <p style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.5}}>Reconnect to a different Supabase project.</p>
+          <Btn ch="Reconfigure Database" v="dk" onClick={()=>{if(confirm('This will log everyone out and show the setup screen. Continue?'))reconfigure();}} full/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  QUOTATION / MANUAL BILLING PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function QuotationPage() {
+  const {user,toast2} = useApp();
+  const [items,setItems]   = useState([]);
+  const [cust,setCust]     = useState('');
+  const [phone,setPhone]   = useState('');
+  const [project,setProject] = useState('');
+  const [discount,setDiscount] = useState('');
+  const [srch,setSrch]     = useState('');
+  const [supFlt,setSupFlt] = useState('All');
+  const [catFlt,setCatFlt] = useState('All');
+  const [tab,setTab]       = useState('catalog');
+  const [qNum] = useState('QT-'+today().replace(/-/g,'')+'-'+String(uid()).slice(-3));
+
+  const CATS_FOR_SUP = sup => {
+    const src = sup==='All'?SUPPLIER_CATALOG:SUPPLIER_CATALOG.filter(i=>i.sup===sup);
+    return ['All',...new Set(src.map(i=>i.cat))];
+  };
+
+  const filtered = SUPPLIER_CATALOG.filter(i=>{
+    const matchSup = supFlt==='All'||i.sup===supFlt;
+    const matchCat = catFlt==='All'||i.cat===catFlt;
+    const matchSrch = !srch||i.name.toLowerCase().includes(srch.toLowerCase())||i.sup.toLowerCase().includes(srch.toLowerCase());
+    return matchSup&&matchCat&&matchSrch;
+  });
+
+  const addItem = cat => {
+    const ex = items.find(i=>i.id===cat.id);
+    if(ex){
+      setItems(prev=>prev.map(i=>i.id===cat.id?{...i,qty:i.qty+1}:i));
+    } else {
+      const margin = 1.25; // default 25% markup
+      setItems(prev=>[...prev,{...cat,qty:1,sellPrice:Math.ceil(cat.cost*margin/10)*10}]);
+    }
+    toast2(cat.name.slice(0,28)+' added','success');
+  };
+
+  const updQty  = (id,d) => setItems(prev=>prev.map(i=>i.id===id?{...i,qty:Math.max(1,i.qty+d)}:i));
+  const updPrice= (id,v) => setItems(prev=>prev.map(i=>i.id===id?{...i,sellPrice:parseFloat(v)||0}:i));
+  const remItem = id => setItems(prev=>prev.filter(i=>i.id!==id));
+  const clearAll= () => { if(confirm('Clear all items?')){setItems([]);} };
+
+  const discN = parseFloat(discount||0);
+  const subtotal = items.reduce((a,i)=>a+i.sellPrice*i.qty,0);
+  const totalAmt = Math.max(0,subtotal-discN);
+  const inCart = id => items.find(i=>i.id===id);
+
+  const printQuotation = () => {
+    if(!cust.trim()){toast2('Enter customer name first!','error');return;}
+    if(!items.length){toast2('Add items to quotation!','error');return;}
+    const el=document.getElementById('bill-print');
+    const rows=items.map((i,n)=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px 4px;font-size:11px">${n+1}</td><td style="padding:6px 4px;font-size:11px">${i.name}</td><td style="padding:6px 4px;font-size:11px;text-align:center">${i.qty} ${i.unit}</td><td style="padding:6px 4px;font-size:11px;text-align:right">Rs.${i.sellPrice.toLocaleString('en',{minimumFractionDigits:2})}</td><td style="padding:6px 4px;font-size:11px;text-align:right;font-weight:700">Rs.${(i.sellPrice*i.qty).toLocaleString('en',{minimumFractionDigits:2})}</td></tr>`).join('');
+    el.innerHTML=`
+      <div style="font-family:Arial,sans-serif;max-width:720px;margin:0 auto;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #CC0000;padding-bottom:14px;margin-bottom:16px">
+          <div>
+            <div style="font-size:22px;font-weight:900;color:#CC0000;letter-spacing:1px">NIPPON ELECTRICALS</div>
+            <div style="font-size:11px;color:#555;margin-top:2px">Electrical Supplies &amp; Solutions · Sri Lanka</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:18px;font-weight:700;color:#333">QUOTATION</div>
+            <div style="font-size:11px;color:#777">No: <strong>${qNum}</strong></div>
+            <div style="font-size:11px;color:#777">Date: <strong>${today()}</strong></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;background:#f9f9f9;padding:12px;border-radius:6px">
+          <div>
+            <div style="font-size:9px;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Bill To</div>
+            <div style="font-size:14px;font-weight:700">${cust}</div>
+            ${phone?`<div style="font-size:11px;color:#555;margin-top:2px">Tel: ${phone}</div>`:''}
+            ${project?`<div style="font-size:11px;color:#555;margin-top:2px">Project: ${project}</div>`:''}
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:9px;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Prepared By</div>
+            <div style="font-size:12px;font-weight:600">${user.name}</div>
+            <div style="font-size:11px;color:#777">Valid: 30 days from issue date</div>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:#CC0000;color:#fff">
+              <th style="padding:8px 4px;font-size:11px;text-align:left;width:28px">#</th>
+              <th style="padding:8px 4px;font-size:11px;text-align:left">Description</th>
+              <th style="padding:8px 4px;font-size:11px;text-align:center;width:60px">Qty</th>
+              <th style="padding:8px 4px;font-size:11px;text-align:right;width:90px">Unit Price</th>
+              <th style="padding:8px 4px;font-size:11px;text-align:right;width:90px">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:16px;display:flex;justify-content:flex-end">
+          <div style="min-width:240px">
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px"><span>Subtotal</span><span>Rs.${subtotal.toLocaleString('en',{minimumFractionDigits:2})}</span></div>
+            ${discN>0?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;color:#CC0000"><span>Discount</span><span>- Rs.${discN.toLocaleString('en',{minimumFractionDigits:2})}</span></div>`:''}
+            <div style="display:flex;justify-content:space-between;padding:10px 0;font-size:16px;font-weight:900;border-top:2px solid #CC0000"><span>TOTAL</span><span style="color:#CC0000">Rs.${totalAmt.toLocaleString('en',{minimumFractionDigits:2})}</span></div>
+          </div>
+        </div>
+        <div style="margin-top:28px;padding-top:14px;border-top:1px solid #eee;font-size:10px;color:#999;text-align:center">
+          All prices are inclusive of taxes unless otherwise stated. Prices subject to change without prior notice.<br/>
+          Thank you for choosing Nippon Electricals — Your trusted electrical supplier.
+        </div>
+      </div>`;
+    window.print();
+  };
+
+  const supColors = {'Kevilton':C.red,'ACL Cables':C.blue,'Kelani':C.orange,'Green Electric':C.green};
+
+  return (
+    <div style={{height:'100vh',display:'flex',flexDirection:'column',paddingBottom:70}}>
+      {/* Header */}
+      <div style={{background:`linear-gradient(135deg,${C.red},#7A0000)`,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
+        <NipponLogo size={32}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:900,fontSize:15,color:'#fff'}}>Quotation Builder</div>
+          <div style={{fontSize:10,color:'#ffcccc'}}>{qNum}</div>
+        </div>
+        <Btn ch={<><Ic n="print" s={14} c="#fff"/>Print</>} onClick={printQuotation} sz="sm"
+          st={{background:'rgba(255,255,255,0.2)',border:'1px solid rgba(255,255,255,0.3)'}}/>
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{display:'flex',background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+        {[['catalog','box','Catalog'],['quote','cart',items.length>0?`Items (${items.length})`:'Items'],['info','users','Customer']].map(([v,ic,lb])=>(
+          <button key={v} onClick={()=>setTab(v)} style={{flex:1,padding:'9px 4px',background:'none',border:'none',cursor:'pointer',color:tab===v?C.red:C.muted,fontWeight:tab===v?700:400,fontSize:11,borderBottom:tab===v?`2px solid ${C.red}`:'2px solid transparent',display:'flex',alignItems:'center',justifyContent:'center',gap:4,transition:'color 0.2s'}}>
+            <Ic n={ic} s={13} c={tab===v?C.red:C.muted}/>{lb}
+          </button>
+        ))}
+      </div>
+
+      {/* ── CATALOG TAB ── */}
+      {tab==='catalog'&&(
+        <div style={{flex:1,overflow:'auto',display:'flex',flexDirection:'column'}}>
+          {/* Search */}
+          <div style={{padding:'10px 12px 6px',background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+            <div style={{position:'relative',marginBottom:8}}>
+              <div style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)'}}><Ic n="srch" s={13} c={C.muted}/></div>
+              <input value={srch} onChange={e=>{setSrch(e.target.value);}} placeholder="Search products…"
+                style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 10px 8px 28px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none'}}
+                onFocus={e=>e.target.style.borderColor=C.red} onBlur={e=>e.target.style.borderColor=C.border}/>
+            </div>
+            {/* Supplier filter */}
+            <div style={{display:'flex',gap:5,overflow:'auto',paddingBottom:3}}>
+              {SSUPS.map(s=>(
+                <button key={s} onClick={()=>{setSupFlt(s);setCatFlt('All');}} style={{background:supFlt===s?C.red:C.border,border:'none',borderRadius:16,padding:'4px 11px',color:'#fff',fontSize:10,cursor:'pointer',whiteSpace:'nowrap',fontWeight:supFlt===s?700:400,flexShrink:0,transition:'all 0.18s'}}>{s}</button>
+              ))}
+            </div>
+          </div>
+          {/* Category filter */}
+          {!srch&&<div style={{padding:'6px 12px',background:'#141414',borderBottom:`1px solid ${C.border}`,display:'flex',gap:5,overflow:'auto'}}>
+            {CATS_FOR_SUP(supFlt).slice(0,12).map(c=>(
+              <button key={c} onClick={()=>setCatFlt(c)} style={{background:catFlt===c?'#333':C.dark,border:`1px solid ${catFlt===c?C.muted:C.border}`,borderRadius:12,padding:'3px 10px',color:catFlt===c?C.text:C.muted,fontSize:10,cursor:'pointer',whiteSpace:'nowrap',transition:'all 0.18s',flexShrink:0}}>{c}</button>
+            ))}
+          </div>}
+          {/* Item count */}
+          <div style={{padding:'6px 13px',fontSize:10,color:C.muted,background:'#141414',borderBottom:`1px solid ${C.border}`}}>
+            {filtered.length} items {srch&&`matching "${srch}"`}
+          </div>
+          {/* Product list */}
+          <div style={{flex:1,overflow:'auto',padding:'8px 10px'}}>
+            {filtered.map((item,i)=>{
+              const ci=inCart(item.id);
+              return (
+                <div key={item.id} className="anim-fadeUp" style={{background:ci?'#1a1000':C.card,borderRadius:10,padding:'10px 12px',marginBottom:7,border:`1px solid ${ci?C.gold+'88':C.border}`,display:'flex',alignItems:'center',gap:10,animationDelay:`${Math.min(i,20)*0.03}s`,transition:'all 0.18s'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:700,lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+                    <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                      <span style={{background:supColors[item.sup]+'22',color:supColors[item.sup],border:`1px solid ${supColors[item.sup]}44`,borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700}}>{item.sup}</span>
+                      <span style={{fontSize:10,color:C.muted}}>{item.cat}</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:3}}>Cost: <span style={{fontFamily:"'Space Mono'",fontWeight:700,color:C.text}}>Rs.{item.cost.toLocaleString()}</span> / {item.unit}</div>
+                  </div>
+                  <button onClick={()=>addItem(item)} style={{background:ci?C.gold:C.red,border:'none',borderRadius:8,width:34,height:34,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'background 0.2s',fontWeight:700,color:'#fff',fontSize:18}}>
+                    {ci?ci.qty:'+'}
+                  </button>
+                </div>
+              );
+            })}
+            {!filtered.length&&<div style={{textAlign:'center',color:C.muted,padding:40}}><Ic n="srch" s={44} c={C.muted}/><p style={{marginTop:12,fontSize:13}}>No products found</p></div>}
+          </div>
+        </div>
+      )}
+
+      {/* ── QUOTE ITEMS TAB ── */}
+      {tab==='quote'&&(
+        <div style={{flex:1,overflow:'auto',display:'flex',flexDirection:'column'}}>
+          <div style={{flex:1,overflow:'auto',padding:'10px 12px'}}>
+            {!items.length?(
+              <div style={{textAlign:'center',color:C.muted,padding:48}}>
+                <Ic n="cart" s={44} c={C.muted}/>
+                <p style={{marginTop:12,fontSize:13}}>No items added yet</p>
+                <Btn ch="Browse Catalog" v="out" onClick={()=>setTab('catalog')} st={{marginTop:16}}/>
+              </div>
+            ):items.map((item,i)=>(
+              <div key={item.id} className="anim-fadeUp" style={{background:C.card,borderRadius:10,padding:11,marginBottom:8,border:`1px solid ${C.border}`,animationDelay:`${i*0.04}s`}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                  <div style={{flex:1,minWidth:0,paddingRight:6}}>
+                    <div style={{fontSize:12,fontWeight:700,lineHeight:1.3,marginBottom:2}}>{item.name}</div>
+                    <span style={{background:supColors[item.sup]+'22',color:supColors[item.sup],border:`1px solid ${supColors[item.sup]}44`,borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700}}>{item.sup}</span>
+                    <div style={{fontSize:10,color:C.muted,marginTop:3}}>Cost Price: Rs.{item.cost.toLocaleString()}</div>
+                  </div>
+                  <button onClick={()=>remItem(item.id)} style={{background:'#3a1a1a',border:'none',borderRadius:6,padding:'5px 7px',cursor:'pointer',flexShrink:0}}><Ic n="del" s={13} c={C.red}/></button>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'auto 1fr auto',gap:8,alignItems:'center'}}>
+                  <div style={{display:'flex',alignItems:'center',background:'#242424',borderRadius:8,overflow:'hidden'}}>
+                    <button onClick={()=>updQty(item.id,-1)} style={{background:'none',border:'none',padding:'6px 11px',cursor:'pointer',color:C.red,fontSize:16,fontWeight:700}}>−</button>
+                    <span style={{fontFamily:"'Space Mono'",fontWeight:700,fontSize:13,minWidth:22,textAlign:'center'}}>{item.qty}</span>
+                    <button onClick={()=>updQty(item.id,1)} style={{background:'none',border:'none',padding:'6px 11px',cursor:'pointer',color:C.green,fontSize:16,fontWeight:700}}>+</button>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:C.muted,marginBottom:3,textTransform:'uppercase',letterSpacing:0.4}}>Sell Price (Rs.)</div>
+                    <input type="number" value={item.sellPrice} onChange={e=>updPrice(item.id,e.target.value)}
+                      style={{width:'100%',background:'#1a1a00',border:`1.5px solid ${C.gold}66`,borderRadius:7,padding:'6px 9px',color:C.text,fontSize:13,fontFamily:"'Space Mono'",fontWeight:700,outline:'none'}}
+                      onFocus={e=>e.target.style.borderColor=C.gold} onBlur={e=>e.target.style.borderColor=C.gold+'66'}/>
+                  </div>
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontSize:9,color:C.muted,marginBottom:3,textTransform:'uppercase',letterSpacing:0.4}}>Line Total</div>
+                    <div style={{fontFamily:"'Space Mono'",fontWeight:900,fontSize:13,color:C.red}}>Rs.{(item.sellPrice*item.qty).toLocaleString('en',{minimumFractionDigits:0})}</div>
+                  </div>
+                </div>
+                {item.cost>0&&<div style={{marginTop:6,fontSize:10,color:item.sellPrice>item.cost?C.green:C.red}}>
+                  Margin: Rs.{((item.sellPrice-item.cost)*item.qty).toLocaleString()} ({item.cost>0?((item.sellPrice-item.cost)/item.cost*100).toFixed(0):0}%)
+                </div>}
+              </div>
+            ))}
+          </div>
+          {items.length>0&&(
+            <div style={{background:'#141414',padding:14,borderTop:`1px solid ${C.border}`}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:6,fontSize:13}}><span style={{color:C.muted}}>Subtotal</span><span style={{fontFamily:"'Space Mono'",fontWeight:700}}>Rs.{subtotal.toLocaleString('en',{minimumFractionDigits:2})}</span></div>
+              <input value={discount} onChange={e=>setDiscount(e.target.value)} placeholder="Discount (Rs.)" type="number"
+                style={{width:'100%',background:'#242424',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:13,fontFamily:"'Noto Sans JP'",outline:'none',marginBottom:8}}/>
+              <div style={{display:'flex',justifyContent:'space-between',borderTop:`1px solid ${C.border}`,paddingTop:8,marginBottom:12}}>
+                <span style={{fontWeight:700,fontSize:15}}>TOTAL</span>
+                <span style={{fontFamily:"'Space Mono'",fontWeight:900,fontSize:20,color:C.red}}>Rs.{totalAmt.toLocaleString('en',{minimumFractionDigits:2})}</span>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <Btn ch="Clear All" v="dk" onClick={clearAll} st={{flex:1}}/>
+                <Btn ch={<><Ic n="print" s={14} c="#fff"/>Print Quotation</>} onClick={printQuotation} st={{flex:2,background:C.green,border:'none',color:'#fff'}}/>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── CUSTOMER INFO TAB ── */}
+      {tab==='info'&&(
+        <div style={{flex:1,overflow:'auto',padding:'14px 13px'}}>
+          <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.5,textTransform:'uppercase',marginBottom:12}}>Quotation Details</div>
+            <div style={{background:'#242424',borderRadius:8,padding:'9px 13px',marginBottom:12,fontSize:11,color:C.muted}}>
+              Quotation No: <span style={{fontFamily:"'Space Mono'",fontWeight:700,color:C.gold}}>{qNum}</span>
+            </div>
+            <Inp lbl="Customer / Client Name" val={cust} set={setCust} ph="Full name or company" req/>
+            <Inp lbl="Phone Number" val={phone} set={setPhone} ph="07X XXXXXXX" type="tel"/>
+            <Inp lbl="Project / Site Name" val={project} set={setProject} ph="e.g. House wiring – Kandy"/>
+          </div>
+          <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.5,textTransform:'uppercase',marginBottom:12}}>Quote Summary</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
+              <StatBox lbl="Total Items" val={items.length} col={C.blue} icon="box"/>
+              <StatBox lbl="Quotation Total" val={'Rs.'+Math.round(totalAmt/1000)+'K'} col={C.green} icon="coin"/>
+            </div>
+            <Btn ch={<><Ic n="print" s={14} c="#fff"/>Print Quotation</>} onClick={printQuotation} full sz="lg"
+              dis={!cust.trim()||!items.length} st={{background:C.green,border:'none',color:'#fff'}}/>
+            {(!cust||!items.length)&&<p style={{fontSize:11,color:C.muted,textAlign:'center',marginTop:8}}>{!cust?'Enter customer name above':''}{!items.length?' Add items from Catalog':''}</p>}
+          </div>
+          <div style={{background:'#1a1000',border:`1px solid ${C.gold}33`,borderRadius:10,padding:'10px 14px',fontSize:11,color:C.gold,lineHeight:1.6}}>
+            <strong>Tip:</strong> Set selling prices in the Items tab. Default markup is 25% over supplier cost price. Prices shown are supplier MRP — you may buy at dealer discount.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  APP ROOT
+// ═══════════════════════════════════════════════════════════════════════
+function App() {
+  const [configured,setConfigured]=useState(()=>!!getCfg());
+  const [ready,setReady]  =useState(false);
+  const [dbErr,setDbErr]  =useState('');
+  const [me,setMe]        =useState(null);
+  const [pg,setPg]        =useState('dash');
+  const [toast,setToast]  =useState(null);
+  const [users,setUsers]  =useState([]);
+  const [products,setProducts]=useState([]);
+  const [sales,setSales]  =useState([]);
+  const [cheques,setCheques]=useState([]);
+  const [companies,setCompanies]=useState([]);
+  const [posKey,setPosKey]=useState(0);
+  const [bill,setBill]    =useState(null);
+  const tRef=useRef(null);
+  const chanRef=useRef(null);
+
+  const merge=(set,item)=>set(prev=>prev.find(x=>x.id===item.id)?prev.map(x=>x.id===item.id?item:x):[...prev,item]);
+  const remove=(set,id)=>set(prev=>prev.filter(x=>x.id!==id));
+
+  const subscribeRT=()=>{
+    if(chanRef.current)_sb.removeChannel(chanRef.current);
+    const map={users:setUsers,products:setProducts,sales:setSales,cheques:setCheques,companies:setCompanies};
+    const ch=_sb.channel('ne-rt-'+Math.random());
+    Object.keys(map).forEach(t=>ch.on('postgres_changes',{event:'*',schema:'public',table:t},pl=>{
+      if(pl.eventType==='DELETE')remove(map[t],pl.old.id);
+      else merge(map[t],{...pl.new.data,id:pl.new.id});
+    }));
+    ch.subscribe(); chanRef.current=ch;
+  };
+
+  const loadAll=async()=>{
+    const[u,p,s,c,co]=await Promise.all([DB.getAll('users'),DB.getAll('products'),DB.getAll('sales'),DB.getAll('cheques'),DB.getAll('companies')]);
+    setUsers(u);setProducts(p);setSales(s);setCheques(c);setCompanies(co);
+  };
+
+  useEffect(()=>{
+    if(!configured)return;
+    const cfg=getCfg(); if(!cfg)return;
+    initSupabase(cfg.url,cfg.key);
+    setReady(false);setDbErr('');
+    loadAll()
+      .then(async()=>{await DB.seed('users',SEED_USERS);const[u]=await Promise.all([DB.getAll('users')]);setUsers(u);subscribeRT();})
+      .catch(e=>{console.error(e);setDbErr('Connection failed: '+e.message);})
+      .finally(()=>setReady(true));
+    return()=>{if(chanRef.current)_sb.removeChannel(chanRef.current);};
+  },[configured]);
+
+  const toast2=(msg,type='info')=>{setToast({msg,type});clearTimeout(tRef.current);tRef.current=setTimeout(()=>setToast(null),2800);};
+  const login=u=>{setMe(u);setPg('dash');};
+  const logout=()=>{setMe(null);setPg('dash');setBill(null);};
+  const reconfigure=()=>{clearCfg();setConfigured(false);setMe(null);setReady(false);};
+
+  const upsertProduct=async p=>{await DB.put('products',p);merge(setProducts,p);};
+  const deleteProduct=async id=>{await DB.del('products',id);remove(setProducts,id);};
+  const upsertCheque =async c=>{await DB.put('cheques',c);merge(setCheques,c);};
+  const deleteCheque =async id=>{await DB.del('cheques',id);remove(setCheques,id);};
+  const upsertUser   =async u=>{await DB.put('users',u);merge(setUsers,u);};
+  const upsertCompany=async c=>{await DB.put('companies',c);merge(setCompanies,c);};
+  const deleteCompany=async id=>{await DB.del('companies',id);remove(setCompanies,id);};
+  const onSaleComplete=async sale=>{await DB.put('sales',sale);setSales(prev=>[...prev,sale]);setBill(sale);setPosKey(k=>k+1);};
+  const onNewSale=()=>setBill(null);
+
+  if(!configured) return <SetupScreen onConnected={()=>setConfigured(true)}/>;
+  if(!ready) return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+      <div className="anim-float"><NipponLogo size={72} glow={true}/></div>
+      <div style={{color:C.muted,fontSize:14}}>Connecting to database…</div>
+      {dbErr&&<div style={{maxWidth:300,background:'#3a1a1a',border:`1px solid ${C.red}44`,borderRadius:10,padding:16,textAlign:'center'}}>
+        <p style={{fontSize:12,color:'#ff8888',marginBottom:12,lineHeight:1.5}}>{dbErr}</p>
+        <Btn ch="Reconfigure" v="out" onClick={reconfigure}/>
+      </div>}
+    </div>
+  );
+
+  const ctx={user:me,users,products,sales,cheques,companies,toast2,login,logout,onSaleComplete,upsertProduct,deleteProduct,upsertCheque,deleteCheque,upsertUser,upsertCompany,deleteCompany,reconfigure};
+  const pages={dash:Dashboard,prod:ProductsPage,comp:CompaniesPage,chq:ChequesPage,accts:AccountsPage,quot:QuotationPage};
+  const renderPOS=()=>bill?<BillView sale={bill} onNewSale={onNewSale}/>:<POSPage key={posKey}/>;
+
+  return (
+    <Ctx.Provider value={ctx}>
+      <div style={{maxWidth:480,margin:'0 auto',minHeight:'100vh',position:'relative'}}>
+        {!me?<LoginPage/>:(
+          <>
+            {pg==='pos'?renderPOS():React.createElement(pages[pg]||Dashboard)}
+            {!(pg==='pos'&&bill)&&<Nav pg={pg} setPg={setPg} user={me}/>}
+          </>
+        )}
+        <Toast t={toast}/>
+      </div>
+    </Ctx.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
