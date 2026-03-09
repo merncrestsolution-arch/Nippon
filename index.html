@@ -720,8 +720,13 @@ function LoginPage() {
   const [un,setUn]=useState('');
   const [pw,setPw]=useState('');
   const [err,setErr]=useState('');
-  const submit=()=>{
-    const u=users.find(x=>x.username.toLowerCase()===un.toLowerCase()&&x.password===pw);
+  const submit=(e)=>{
+    if(e&&e.preventDefault)e.preventDefault();
+    setErr('');
+    const uName=un.trim(), uPw=pw.trim();
+    if(!uName||!uPw){setErr('Please enter username and password.');return;}
+    if(!users.length){setErr('No users in database. Check connection.');return;}
+    const u=users.find(x=>x.username&&x.username.toLowerCase()===uName.toLowerCase()&&x.password===uPw);
     if(!u){setErr('Invalid username or password.');return;}
     login(u);toast2('Welcome, '+u.name+'!','success');
   };
@@ -731,12 +736,14 @@ function LoginPage() {
       <h1 style={{fontSize:22,fontWeight:900,letterSpacing:1,color:'#fff',marginBottom:4}}>NIPPON ELECTRICALS</h1>
       <p style={{fontSize:12,color:C.muted,marginBottom:28}}>Smart POS System · Sri Lanka</p>
       <div style={{width:'100%',maxWidth:340}}>
+        <form onSubmit={submit} style={{width:'100%'}}>
         <Card>
-          <Inp lbl="Username" val={un} set={setUn} ph="admin"/>
-          <Inp lbl="Password" val={pw} set={setPw} ph="••••••••" type="password"/>
+          <Inp lbl="Username" val={un} set={v=>{setUn(v);setErr('');}} ph="admin"/>
+          <Inp lbl="Password" val={pw} set={v=>{setPw(v);setErr('');}} ph="••••••••" type="password"/>
           {err&&<div style={{color:'#ff6666',fontSize:12,marginBottom:10}}>{err}</div>}
-          <Btn ch="Sign In" onClick={submit} full sz="lg"/>
+          <button type="submit" style={{width:'100%',background:C.red,border:'none',borderRadius:9,padding:'12px 18px',fontSize:14,fontWeight:700,color:'#fff',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>Sign In</button>
         </Card>
+        </form>
         <p style={{textAlign:'center',fontSize:10,color:C.muted,marginTop:16}}>Default: admin / admin123</p>
       </div>
     </div>
