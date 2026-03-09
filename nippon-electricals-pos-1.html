@@ -1,0 +1,1990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Nippon Electricals POS</title>
+<meta name="theme-color" content="#CC0000"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:"Noto Sans JP",sans-serif;background:#0f0f0f;color:#f0f0f0;min-height:100vh;overflow-x:hidden}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#CC0000;border-radius:2px}
+select option{background:#1a1a1a;color:#f0f0f0}
+@media print{body *{visibility:hidden}#bill-print,#bill-print *{visibility:visible}#bill-print{position:fixed;top:0;left:0;width:100%;background:#fff;color:#000;padding:0;font-family:Arial,sans-serif}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes popIn{0%{opacity:0;transform:scale(0.82)}70%{transform:scale(1.06)}100%{opacity:1;transform:scale(1)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes glow{0%,100%{box-shadow:0 0 18px #CC000066,0 0 40px #CC000022}50%{box-shadow:0 0 40px #CC0000bb,0 0 80px #CC000044}}
+@keyframes bulbPulse{0%,100%{filter:brightness(1) drop-shadow(0 0 6px #FFD70099)}50%{filter:brightness(1.18) drop-shadow(0 0 22px #FFD700ff)}}
+@keyframes badgePop{0%{transform:scale(0)}60%{transform:scale(1.4)}100%{transform:scale(1)}}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes navPop{0%{transform:scale(0.6) translateY(5px)}100%{transform:scale(1) translateY(0)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.fadeUp{animation:fadeUp 0.3s ease both}
+.fadeIn{animation:fadeIn 0.22s ease both}
+.slideDown{animation:slideDown 0.3s ease both}
+.popIn{animation:popIn 0.3s cubic-bezier(.34,1.56,.64,1) both}
+.slideUp{animation:slideUp 0.36s cubic-bezier(.22,1,.36,1) both}
+.floatAnim{animation:float 3s ease-in-out infinite}
+.glowAnim{animation:glow 2.8s ease-in-out infinite;border-radius:20px}
+.bulbAnim{animation:bulbPulse 2.2s ease-in-out infinite}
+.badgeAnim{animation:badgePop 0.28s cubic-bezier(.34,1.56,.64,1) both}
+.navActive{animation:navPop 0.22s cubic-bezier(.34,1.56,.64,1) both}
+/* Thermal print styles */
+.print-thermal{font-family:"Courier New",monospace!important;font-size:12px!important;max-width:300px!important;margin:0 auto!important}
+.print-a5{max-width:148mm!important;font-size:11px!important}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="bill-print" style="display:none"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script type="text/babel">
+const {useState,useEffect,useRef,createContext,useContext} = React;
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+const CFG_KEY = "ne_supabase_cfg";
+const getCfg = () => { try { return JSON.parse(localStorage.getItem(CFG_KEY)||"null"); } catch(e) { return null; } };
+const saveCfg = (u,k) => localStorage.setItem(CFG_KEY, JSON.stringify({url:u,key:k}));
+const clearCfg = () => localStorage.removeItem(CFG_KEY);
+let _sb = null;
+const initSB = (u,k) => { _sb = window.supabase.createClient(u,k); return _sb; };
+
+// ─── DB ───────────────────────────────────────────────────────────────────────
+const DB = {
+  getAll: async (t) => {
+    const {data,error} = await _sb.from(t).select("id,data").order("id");
+    if (error) throw error;
+    return (data||[]).map(r => ({...r.data, id:r.id}));
+  },
+  put: async (t,item) => {
+    const {error} = await _sb.from(t).upsert({id:item.id,data:item},{onConflict:"id"});
+    if (error) throw error;
+  },
+  del: async (t,id) => {
+    const {error} = await _sb.from(t).delete().eq("id",id);
+    if (error) throw error;
+  },
+  seed: async (t,rows) => {
+    const {count,error} = await _sb.from(t).select("id",{count:"exact",head:true});
+    if (!error && count===0) { for (const r of rows) await DB.put(t,r); }
+  }
+};
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const CATS = ["Lighting","Circuit Breakers","Wires & Cables","Switchgear","Fans","Accessories","Tools","Conduit & Fittings","Other"];
+const BANKS = ["Bank of Ceylon","HNB","Commercial Bank","Sampath Bank","Peoples Bank","NDB","DFCC","Seylan Bank","Pan Asia Bank","Nations Trust Bank","Union Bank","Citi Bank","Other"];
+const SUP_COL = {Kevilton:"#CC0000","ACL Cables":"#1976D2",Kelani:"#FF6D00","Green Electric":"#00C853","Dimo Lumin":"#B8860B"};
+const C = {red:"#CC0000",dark:"#0f0f0f",card:"#1a1a1a",border:"#2a2a2a",text:"#f0f0f0",muted:"#888",gold:"#FFD700",green:"#00C853",blue:"#1976D2",orange:"#FF6D00",purple:"#7B1FA2"};
+const SSUPS = ["All","Kevilton","ACL Cables","Kelani","Green Electric","Dimo Lumin"];
+const EXP_CATS = ["Stock Purchase","Electricity","Rent","Salaries","Transport","Maintenance","Office Supplies","Other"];
+const SEED_USERS = [{id:1,name:"Admin",username:"admin",password:"admin123",role:"admin",email:"",active:true,avatar:"A"}];
+
+// ─── Context ──────────────────────────────────────────────────────────────────
+const AppCtx = createContext(null);
+const useApp = () => useContext(AppCtx);
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const lkr = n => "Rs. "+Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
+const lkrK = n => "Rs. "+(Number(n||0)/1000).toFixed(1)+"K";
+const uid = () => Date.now()+Math.floor(Math.random()*9999);
+const today = () => new Date().toISOString().split("T")[0];
+const compressImg = file => new Promise(res => {
+  const rd = new FileReader();
+  rd.onload = e => {
+    const im = new Image();
+    im.onload = () => {
+      const MAX=1200, r=Math.min(MAX/im.width,MAX/im.height,1);
+      const cv = document.createElement("canvas");
+      cv.width=im.width*r; cv.height=im.height*r;
+      cv.getContext("2d").drawImage(im,0,0,cv.width,cv.height);
+      res(cv.toDataURL("image/jpeg",0.75));
+    };
+    im.src = e.target.result;
+  };
+  rd.readAsDataURL(file);
+});
+const xlsxExp = (rows,sheet,fname) => {
+  const ws=XLSX.utils.json_to_sheet(rows), wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,sheet); XLSX.writeFile(wb,fname+".xlsx");
+};
+const pdfExp = (title,cols,rows,fname) => {
+  try {
+    const {jsPDF}=window.jspdf, doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
+    doc.setFontSize(14); doc.setTextColor(204,0,0); doc.text("NIPPON ELECTRICALS",14,14);
+    doc.setFontSize(11); doc.setTextColor(0); doc.text(title,14,21);
+    doc.autoTable({columns:cols.map(c=>({header:c.h,dataKey:c.k})),body:rows,startY:28,styles:{fontSize:8},headStyles:{fillColor:[204,0,0],textColor:255}});
+    doc.save(fname+".pdf");
+  } catch(e) { alert("PDF export failed"); }
+};
+const _SC=[
+// KEVILTON — Switches (White)
+['kv-w01','Kevilton','Switches','1 Gang 1 Way Switch White','pcs',365],
+['kv-w02','Kevilton','Switches','2 Gang 1 Way Switch White','pcs',710],
+['kv-w03','Kevilton','Switches','3 Gang 1 Way Switch White','pcs',1010],
+['kv-w04','Kevilton','Switches','4 Gang 1 Way Switch White','pcs',1270],
+['kv-w05','Kevilton','Switches','5 Gang 1 Way Switch White','pcs',1560],
+['kv-w06','Kevilton','Switches','1 Gang 2 Way Switch White','pcs',625],
+['kv-w07','Kevilton','Switches','2 Gang 2 Way Switch White','pcs',1150],
+['kv-w08','Kevilton','Switches','3 Gang 2 Way Switch White','pcs',1700],
+['kv-w09','Kevilton','Switches','4 Gang 2 Way Switch White','pcs',2245],
+['kv-w10','Kevilton','Switches','20A Double Pole Switch White','pcs',2035],
+['kv-w11','Kevilton','Switches','Blank Plate White','pcs',330],
+['kv-w12','Kevilton','Switches','Intermediate Switch White','pcs',4410],
+// KEVILTON — Sockets
+['kv-s01','Kevilton','Sockets','6A Socket','pcs',1025],
+['kv-s02','Kevilton','Sockets','13A Socket','pcs',1045],
+['kv-s03','Kevilton','Sockets','13A Socket with Neon','pcs',1380],
+['kv-s04','Kevilton','Sockets','13A Twin Socket','pcs',2185],
+['kv-s05','Kevilton','Sockets','1A USB Charger Socket','pcs',2210],
+['kv-s06','Kevilton','Sockets','2.5A USB Charger Socket','pcs',4050],
+// KEVILTON — Controllers
+['kv-c01','Kevilton','Controllers','Light Dimmer White','pcs',2210],
+['kv-c02','Kevilton','Controllers','Fan Controller White','pcs',2170],
+['kv-c03','Kevilton','Controllers','5-Step Fan Controller White','pcs',2555],
+['kv-v01','Kevilton','Controllers','TV Socket White','pcs',1620],
+['kv-v02','Kevilton','Controllers','Telephone Socket White','pcs',1620],
+['kv-v03','Kevilton','Controllers','Cat 6 Data Socket White','pcs',4525],
+['kv-b01','Kevilton','Switches','Bell Press White','pcs',910],
+// KEVILTON — Modular White
+['kv-m01','Kevilton','Modular','1 Gang 1 Way Switch Modular White','pcs',615],
+['kv-m02','Kevilton','Modular','2 Gang 1 Way Switch Modular White','pcs',875],
+['kv-m03','Kevilton','Modular','3 Gang 1 Way Switch Modular White','pcs',1125],
+['kv-m04','Kevilton','Modular','4 Gang 1 Way Switch Modular White','pcs',1625],
+['kv-m05','Kevilton','Modular','1 Gang 2 Way Switch Modular White','pcs',940],
+['kv-m06','Kevilton','Modular','2 Gang 2 Way Switch Modular White','pcs',1375],
+['kv-m07','Kevilton','Modular','13A Socket Modular White','pcs',1715],
+['kv-m08','Kevilton','Modular','13A Socket w/Neon Modular White','pcs',2190],
+['kv-m09','Kevilton','Modular','Light Dimmer Modular White','pcs',3290],
+['kv-m10','Kevilton','Modular','Fan Controller Modular White','pcs',3290],
+['kv-m11','Kevilton','Modular','Key Card Switch Modular White','pcs',5800],
+['kv-m12','Kevilton','Modular','Blank Plate Modular White','pcs',500],
+// KEVILTON — Nature Series
+['kv-n01','Kevilton','Nature Series','1 Gang 1 Way Switch Kumbuk','pcs',890],
+['kv-n02','Kevilton','Nature Series','2 Gang 1 Way Switch Kumbuk','pcs',1265],
+['kv-n03','Kevilton','Nature Series','3 Gang 1 Way Switch Kumbuk','pcs',1425],
+['kv-n04','Kevilton','Nature Series','1 Gang 2 Way Switch Kumbuk','pcs',1250],
+['kv-n05','Kevilton','Nature Series','2 Gang 2 Way Switch Kumbuk','pcs',1740],
+['kv-n06','Kevilton','Nature Series','13A Socket w/Neon Kumbuk','pcs',2770],
+['kv-n07','Kevilton','Nature Series','Dimmer Kumbuk','pcs',4165],
+['kv-n08','Kevilton','Nature Series','Fan Controller Kumbuk','pcs',4165],
+['kv-n09','Kevilton','Nature Series','Blank Plate Kumbuk','pcs',815],
+// KEVILTON — MCBs
+['kv-p01','Kevilton','Circuit Protection','MCB K10C 6A 1P','pcs',1125],
+['kv-p02','Kevilton','Circuit Protection','MCB K10C 10A 1P','pcs',1125],
+['kv-p03','Kevilton','Circuit Protection','MCB K10C 16A 1P','pcs',1125],
+['kv-p04','Kevilton','Circuit Protection','MCB K10C 20A 1P','pcs',1125],
+['kv-p05','Kevilton','Circuit Protection','MCB K10C 32A 1P','pcs',1125],
+['kv-p06','Kevilton','Circuit Protection','MCB K10C 40A 1P','pcs',1440],
+['kv-p07','Kevilton','Circuit Protection','MCB K10C 63A 1P','pcs',1440],
+['kv-p08','Kevilton','Circuit Protection','MCB K10C 6A 2P','pcs',2590],
+['kv-p09','Kevilton','Circuit Protection','MCB K10C 10A 2P','pcs',2590],
+['kv-p10','Kevilton','Circuit Protection','MCB K10C 16A 2P','pcs',2590],
+['kv-p11','Kevilton','Circuit Protection','MCB K10C 32A 2P','pcs',2590],
+['kv-p12','Kevilton','Circuit Protection','MCB K10C 40A 2P','pcs',2790],
+['kv-p13','Kevilton','Circuit Protection','MCB K10C 63A 2P','pcs',2790],
+['kv-p14','Kevilton','Circuit Protection','MCB K10C 6-32A 3P','pcs',4200],
+['kv-p15','Kevilton','Circuit Protection','MCB K10C 40-63A 3P','pcs',4800],
+['kv-p16','Kevilton','Circuit Protection','RCCB K10R 40A 30mA 2P','pcs',8440],
+['kv-p17','Kevilton','Circuit Protection','RCCB K10R 63A 30mA 2P','pcs',10490],
+['kv-p18','Kevilton','Circuit Protection','Isolator K10I 40A 2P','pcs',3125],
+['kv-p19','Kevilton','Circuit Protection','Isolator K10I 63A 2P','pcs',3975],
+['kv-p20','Kevilton','Circuit Protection','Changeover Switch 40A 2P','pcs',3860],
+['kv-p21','Kevilton','Circuit Protection','Changeover Switch 63A 2P','pcs',6840],
+['kv-p22','Kevilton','Circuit Protection','SAFETAA MCB 6A-32A 1P','pcs',650],
+['kv-p23','Kevilton','Circuit Protection','HEXA MCB 6A-32A 1P','pcs',810],
+['kv-p24','Kevilton','Circuit Protection','MCCB 30-100A 3P','pcs',13055],
+['kv-p25','Kevilton','Circuit Protection','MCCB 125-160A 3P','pcs',22520],
+// KEVILTON — Conduit
+['kv-co1','Kevilton','Conduit','Conduit Pipe 16mm 4m','pcs',280],
+['kv-co2','Kevilton','Conduit','Conduit Pipe 20mm 4m','pcs',370],
+['kv-co3','Kevilton','Conduit','Conduit Pipe 25mm 4m','pcs',480],
+['kv-co4','Kevilton','Conduit','Conduit Saddle 16mm','pcs',26],
+['kv-co5','Kevilton','Conduit','Conduit Saddle 20mm','pcs',29],
+['kv-co6','Kevilton','Conduit','Conduit Bend 16mm','pcs',52],
+['kv-co7','Kevilton','Conduit','Conduit Bend 20mm','pcs',67],
+['kv-co8','Kevilton','Conduit','Corrugated Conduit 18mm 15m','roll',2100],
+['kv-co9','Kevilton','Conduit','Corrugated Conduit 20mm 15m','roll',3225],
+['kv-c10','Kevilton','Conduit','Corrugated Conduit 25mm 15m','roll',3625],
+['kv-t01','Kevilton','Trunking','Cable Trunking 16x12.5mm 3m','pcs',420],
+['kv-t02','Kevilton','Trunking','Cable Trunking 20x12.5mm 3m','pcs',510],
+['kv-t03','Kevilton','Trunking','Cable Trunking 25x16mm 3m','pcs',615],
+['kv-t04','Kevilton','Trunking','Cable Trunking 40x25mm 3m','pcs',1200],
+['kv-t05','Kevilton','Trunking','Cable Trunking 50x25mm 3m','pcs',1485],
+['kv-t06','Kevilton','Trunking','Cable Trunking 100x50mm 3m','pcs',4395],
+// KEVILTON — Accessories
+['kv-a01','Kevilton','Accessories','13A Fused Plug Top','pcs',505],
+['kv-a02','Kevilton','Accessories','Single Sunk Box','pcs',155],
+['kv-a03','Kevilton','Accessories','Twin Sunk Box','pcs',315],
+['kv-a04','Kevilton','Accessories','B22 Pendant Holder','pcs',225],
+['kv-a05','Kevilton','Accessories','B22 Batten Holder Angle','pcs',350],
+['kv-a06','Kevilton','Accessories','E27 Pendant Holder','pcs',450],
+['kv-a07','Kevilton','Accessories','E27 Batten Holder Angle','pcs',550],
+['kv-a08','Kevilton','Accessories','Ceiling Rose 3 Terminal','pcs',390],
+['kv-a09','Kevilton','Accessories','4-Way Junction Box','pcs',120],
+['kv-a10','Kevilton','Accessories','Insulation Tape','pcs',160],
+['kv-a11','Kevilton','Accessories','Electric Bell 230V','pcs',1090],
+['kv-a12','Kevilton','Accessories','13A 4-Way Trailing Socket 3m','pcs',5250],
+['kv-a13','Kevilton','Accessories','13A 4-Way Trailing Socket 5m','pcs',5950],
+// KEVILTON — Lighting
+['kv-l01','Kevilton','Lighting','LED Bulb 3.5W B22/E27','pcs',600],
+['kv-l02','Kevilton','Lighting','LED Bulb 5W B22/E27','pcs',750],
+['kv-l03','Kevilton','Lighting','LED Bulb 7W B22/E27','pcs',880],
+['kv-l04','Kevilton','Lighting','LED Bulb 9W B22/E27','pcs',950],
+['kv-l05','Kevilton','Lighting','LED Bulb 12W B22/E27','pcs',1100],
+['kv-l06','Kevilton','Lighting','LED High Power 30W','pcs',3900],
+['kv-l07','Kevilton','Lighting','LED High Power 40W','pcs',4985],
+['kv-l08','Kevilton','Lighting','LED High Power 50W','pcs',6100],
+['kv-l09','Kevilton','Lighting','LED Ceiling Sunk 4W','pcs',1215],
+['kv-l10','Kevilton','Lighting','LED Ceiling Sunk 6W','pcs',2005],
+['kv-l11','Kevilton','Lighting','LED Ceiling Sunk 9W','pcs',2330],
+['kv-l12','Kevilton','Lighting','LED Ceiling Sunk 12W','pcs',3085],
+['kv-l13','Kevilton','Lighting','LED Ceiling Sunk 18W','pcs',3765],
+['kv-l14','Kevilton','Lighting','LED Ceiling Surface 12W','pcs',3715],
+['kv-l15','Kevilton','Lighting','LED Ceiling Surface 18W','pcs',4575],
+['kv-l16','Kevilton','Lighting','LED Tube Light 9W 2ft T8','pcs',1765],
+['kv-l17','Kevilton','Lighting','LED Tube Light 18W 4ft T8','pcs',2380],
+['kv-l18','Kevilton','Lighting','LED Batten Light 18W 4ft T5','pcs',3565],
+// KEVILTON — Fans & Batteries
+['kv-f01','Kevilton','Fans','Airmax Ceiling Fan','pcs',16000],
+['kv-bt1','Kevilton','Batteries','Solar Battery 75Ah 12V','pcs',73000],
+['kv-bt2','Kevilton','Batteries','Solar Battery 100Ah 12V','pcs',110000],
+['kv-bt3','Kevilton','Batteries','Solar Battery 150Ah 12V','pcs',140000],
+// ACL CABLES — Wires
+['ac-w01','ACL Cables','Wires','Building Wire 1mm² 100m','roll',7250],
+['ac-w02','ACL Cables','Wires','Building Wire 1.5mm² Single 100m','roll',14490],
+['ac-w03','ACL Cables','Wires','Building Wire 1.5mm² Twin 100m','roll',28600],
+['ac-w04','ACL Cables','Wires','Building Wire 2.5mm² Single 100m','roll',22250],
+['ac-w05','ACL Cables','Wires','Building Wire 2.5mm² Twin 100m','roll',44950],
+['ac-w06','ACL Cables','Wires','Building Wire 4mm² Single 100m','roll',33720],
+['ac-w07','ACL Cables','Wires','Building Wire 4mm² Twin 100m','roll',69490],
+['ac-w08','ACL Cables','Wires','Building Wire 6mm² Single 100m','roll',51240],
+['ac-w09','ACL Cables','Wires','Building Wire 6mm² Twin 100m','roll',103520],
+['ac-w10','ACL Cables','Wires','Building Wire 10mm² Single 100m','roll',86100],
+['ac-w11','ACL Cables','Wires','Building Wire 16mm² Single 100m','roll',133960],
+['ac-w12','ACL Cables','Wires','Earth Cable 1.5mm² 100m','roll',12550],
+['ac-w13','ACL Cables','Wires','Earth Cable 2.5mm² 100m','roll',19070],
+['ac-w14','ACL Cables','Wires','Earth Cable 4mm² 100m','roll',31730],
+['ac-w15','ACL Cables','Wires','Super PVC Wire 1.5mm² Single 100m','roll',13770],
+['ac-w16','ACL Cables','Wires','Super PVC Wire 2.5mm² Single 100m','roll',21140],
+['ac-w17','ACL Cables','Wires','Super PVC Wire 4mm² Single 100m','roll',32040],
+// ACL — Elegance White Switches
+['ac-s01','ACL Cables','Elegance White','Elegance 1G 1W Switch White','pcs',690],
+['ac-s02','ACL Cables','Elegance White','Elegance 2G 1W Switch White','pcs',965],
+['ac-s03','ACL Cables','Elegance White','Elegance 3G 1W Switch White','pcs',1260],
+['ac-s04','ACL Cables','Elegance White','Elegance 4G 1W Switch White','pcs',1870],
+['ac-s05','ACL Cables','Elegance White','Elegance 1G 2W Switch White','pcs',1035],
+['ac-s06','ACL Cables','Elegance White','Elegance 2G 2W Switch White','pcs',1510],
+['ac-s07','ACL Cables','Elegance White','Elegance 13A Socket White','pcs',1910],
+['ac-s08','ACL Cables','Elegance White','Elegance 13A Socket w/Neon White','pcs',2325],
+['ac-s09','ACL Cables','Elegance White','Elegance Light Dimmer White','pcs',3600],
+['ac-s10','ACL Cables','Elegance White','Elegance Fan Controller White','pcs',3970],
+['ac-s11','ACL Cables','Elegance White','Elegance TV Socket White','pcs',3190],
+['ac-s12','ACL Cables','Elegance White','Elegance Data Socket White','pcs',4995],
+['ac-s13','ACL Cables','Elegance White','Elegance Bell Press White','pcs',1340],
+['ac-s14','ACL Cables','Elegance White','Elegance Blank Plate White','pcs',740],
+['ac-s15','ACL Cables','Elegance White','Elegance 20A DP Switch White','pcs',3735],
+// ACL — Elegance Colour
+['ac-c01','ACL Cables','Elegance Colour','Elegance 1G 1W Switch Black/Bronze','pcs',950],
+['ac-c02','ACL Cables','Elegance Colour','Elegance 2G 1W Switch Black/Bronze','pcs',1225],
+['ac-c03','ACL Cables','Elegance Colour','Elegance 3G 1W Switch Black/Bronze','pcs',1480],
+['ac-c04','ACL Cables','Elegance Colour','Elegance 1G 2W Switch Black/Bronze','pcs',1340],
+['ac-c05','ACL Cables','Elegance Colour','Elegance 13A Socket Black/Bronze','pcs',2270],
+['ac-c06','ACL Cables','Elegance Colour','Elegance Light Dimmer Colour','pcs',3905],
+['ac-c07','ACL Cables','Elegance Colour','Elegance Fan Controller Colour','pcs',4160],
+['ac-c08','ACL Cables','Elegance Colour','Elegance TV Socket Colour','pcs',4035],
+['ac-c09','ACL Cables','Elegance Colour','Elegance Data Socket Colour','pcs',5635],
+// ACL — Standard Switches
+['ac-d01','ACL Cables','Switches','1G 1W Switch','pcs',405],
+['ac-d02','ACL Cables','Switches','2G 1W Switch','pcs',760],
+['ac-d03','ACL Cables','Switches','3G 1W Switch','pcs',1090],
+['ac-d04','ACL Cables','Switches','4G 1W Switch','pcs',1365],
+['ac-d05','ACL Cables','Switches','5G 1W Switch','pcs',1670],
+['ac-d06','ACL Cables','Switches','1G 2W Switch','pcs',665],
+['ac-d07','ACL Cables','Switches','2G 2W Switch','pcs',1225],
+['ac-d08','ACL Cables','Switches','3G 2W Switch','pcs',1805],
+['ac-d09','ACL Cables','Switches','13A Switched Socket','pcs',1150],
+['ac-d10','ACL Cables','Switches','13A Socket with Neon','pcs',1470],
+['ac-d11','ACL Cables','Switches','13A Twin Socket','pcs',2090],
+['ac-d12','ACL Cables','Switches','Fan Speed Controller','pcs',1625],
+['ac-d13','ACL Cables','Switches','Light Dimmer','pcs',2345],
+['ac-d14','ACL Cables','Switches','5-Step Fan Controller','pcs',2725],
+['ac-d15','ACL Cables','Switches','Bell Press','pcs',985],
+['ac-d16','ACL Cables','Switches','TV Socket','pcs',1745],
+['ac-d17','ACL Cables','Switches','Telephone Socket','pcs',1745],
+['ac-d18','ACL Cables','Switches','20A Double Pole Switch','pcs',2315],
+['ac-d19','ACL Cables','Switches','USB Charger Socket','pcs',4685],
+['ac-d20','ACL Cables','Switches','Blank Plate','pcs',360],
+['ac-d21','ACL Cables','Switches','Data Socket','pcs',4020],
+['ac-d22','ACL Cables','Accessories','Lamp Holder B22','pcs',285],
+['ac-d23','ACL Cables','Accessories','Ceiling Rose','pcs',370],
+['ac-d24','ACL Cables','Accessories','13A Plug Top','pcs',600],
+['ac-d25','ACL Cables','Fans','ACL Ceiling Fan','pcs',16750],
+// ACL — Circuit Protection
+['ac-p01','ACL Cables','Circuit Protection','Venus MCB 6A-32A 1P','pcs',995],
+['ac-p02','ACL Cables','Circuit Protection','Venus MCB 6A-32A 2P','pcs',2275],
+['ac-p03','ACL Cables','Circuit Protection','Venus MCB 40A-63A 2P','pcs',2475],
+['ac-p04','ACL Cables','Circuit Protection','Venus MCB 6A-32A 3P','pcs',3695],
+['ac-p05','ACL Cables','Circuit Protection','Venus RCD 40A 30mA 2P','pcs',7475],
+['ac-p06','ACL Cables','Circuit Protection','Venus Isolator 40A 2P','pcs',2580],
+['ac-p07','ACL Cables','Circuit Protection','Mercury MCB 6A-32A 1P','pcs',700],
+['ac-p08','ACL Cables','Circuit Protection','Mercury RCD 40A 30mA 2P','pcs',5900],
+// KELANI — Wires
+['kl-w01','Kelani','Wires','Building Wire 1mm² 100m','roll',7250],
+['kl-w02','Kelani','Wires','Building Wire 1.5mm² Single 100m','roll',14490],
+['kl-w03','Kelani','Wires','Building Wire 1.5mm² Twin 100m','roll',28600],
+['kl-w04','Kelani','Wires','Building Wire 2.5mm² Single 100m','roll',22250],
+['kl-w05','Kelani','Wires','Building Wire 2.5mm² Twin 100m','roll',44950],
+['kl-w06','Kelani','Wires','Building Wire 4mm² Single 100m','roll',33720],
+['kl-w07','Kelani','Wires','Building Wire 4mm² Twin 100m','roll',69490],
+['kl-w08','Kelani','Wires','Building Wire 6mm² Single 100m','roll',51240],
+['kl-w09','Kelani','Wires','Building Wire 10mm² Single 100m','roll',86100],
+['kl-w10','Kelani','Wires','Building Wire 16mm² Single 100m','roll',133960],
+['kl-w11','Kelani','Wires','Building Wire 25mm² Single 100m','roll',301190],
+['kl-w12','Kelani','Wires','Earth Wire 1.5mm² 100m','roll',12550],
+['kl-w13','Kelani','Wires','Earth Wire 2.5mm² 100m','roll',19470],
+// GREEN ELECTRIC
+['ge-b01','Green Electric','Lighting','Eco Smart Bulb B22 7W-14W','pcs',500],
+['ge-b02','Green Electric','Lighting','Emergency Bulb','pcs',2250],
+['ge-b03','Green Electric','Lighting','Green Intelligent Bulb 7W-9W','pcs',1650],
+['ge-b04','Green Electric','Lighting','Highpower Bulb B22 20W-50W','pcs',1950],
+['ge-b05','Green Electric','Lighting','LED Candle Bulb B22 3W-10W','pcs',690],
+['ge-p01','Green Electric','Lighting','Eco Smart Panel Recessed 6W-18W','pcs',1350],
+['ge-p02','Green Electric','Lighting','Eco Surfaced Panel 6W-18W','pcs',1625],
+['ge-p03','Green Electric','Lighting','Flat Panel 40W 600x600','pcs',9900],
+['ge-p04','Green Electric','Lighting','Standard Recessed Panel 6W-24W','pcs',1725],
+['ge-f01','Green Electric','Lighting','Eco Flood Light 10W-100W','pcs',2990],
+['ge-f02','Green Electric','Lighting','Standard Flood Light IP66 10W-200W','pcs',2990],
+['ge-f03','Green Electric','Lighting','Sensor Flood Light 30W-50W','pcs',7250],
+['ge-f04','Green Electric','Lighting','Solar LED Flood Light 30W-100W','pcs',11500],
+['ge-sl1','Green Electric','Lighting','Smart Street Light 50W-150W','pcs',11500],
+['ge-sl2','Green Electric','Lighting','Solar LED Street Light 30W-200W','pcs',7950],
+['ge-sl3','Green Electric','Lighting','Street Light 50W-200W','pcs',9900],
+// DIMO LUMIN — Lighting
+['dl-g01','Dimo Lumin','Lighting','Eco LED Globe 3W B22/E27','pcs',525],
+['dl-g02','Dimo Lumin','Lighting','Eco LED Globe 5W B22/E27','pcs',650],
+['dl-g03','Dimo Lumin','Lighting','Eco LED Globe 7W B22/E27','pcs',775],
+['dl-g04','Dimo Lumin','Lighting','Eco LED Globe 9W B22/E27','pcs',850],
+['dl-g05','Dimo Lumin','Lighting','Eco LED Globe 12W B22/E27','pcs',1000],
+['dl-g06','Dimo Lumin','Lighting','Eco LED Globe 15W B22/E27','pcs',1450],
+['dl-h01','Dimo Lumin','Lighting','Eco High Power 20W B22/E27','pcs',2750],
+['dl-h02','Dimo Lumin','Lighting','Eco High Power 30W B22/E27','pcs',3350],
+['dl-h03','Dimo Lumin','Lighting','Eco High Power 40W B22/E27','pcs',4250],
+['dl-h04','Dimo Lumin','Lighting','Eco High Power 50W B22/E27','pcs',5890],
+['dl-hp1','Dimo Lumin','Lighting','LED High Power 20W B22/E27','pcs',3670],
+['dl-hp2','Dimo Lumin','Lighting','LED High Power 30W B22/E27','pcs',4840],
+['dl-hp3','Dimo Lumin','Lighting','LED High Power 50W E27','pcs',7250],
+['dl-f01','Dimo Lumin','Lighting','Eco Flood Light 10W','pcs',3370],
+['dl-f02','Dimo Lumin','Lighting','Eco Flood Light 20W','pcs',4550],
+['dl-f03','Dimo Lumin','Lighting','Eco Flood Light 50W','pcs',8440],
+['dl-f04','Dimo Lumin','Lighting','Eco Flood Light 100W','pcs',13500],
+['dl-f05','Dimo Lumin','Lighting','Eco Flood Light 150W','pcs',23250],
+['dl-f06','Dimo Lumin','Lighting','Eco Flood Light 200W','pcs',33520],
+['dl-e01','Dimo Lumin','Lighting','Emergency Light 8W B22','pcs',4220],
+['dl-e02','Dimo Lumin','Lighting','Emergency Light 8W E27','pcs',4220],
+['dl-e03','Dimo Lumin','Lighting','Smart Emergency Light 10W B22','pcs',3440],
+['dl-e04','Dimo Lumin','Lighting','Emergency Panel 12W Surface Square','pcs',5890],
+['dl-e05','Dimo Lumin','Lighting','Emergency Panel 12W Surface Round','pcs',5890],
+['dl-e06','Dimo Lumin','Lighting','Emergency Panel 12W Sunk Round','pcs',5190],
+['dl-ps1','Dimo Lumin','Lighting','Panel Surface 6W','pcs',2100],
+['dl-ps2','Dimo Lumin','Lighting','Panel Surface 12W','pcs',3000],
+['dl-ps3','Dimo Lumin','Lighting','Panel Surface 18W','pcs',4000],
+['dl-ps4','Dimo Lumin','Lighting','Panel Surface 24W Square','pcs',4490],
+['dl-pr1','Dimo Lumin','Lighting','Panel Sunk/Recessed 6W','pcs',1850],
+['dl-pr2','Dimo Lumin','Lighting','Panel Sunk/Recessed 12W','pcs',2800],
+['dl-pr3','Dimo Lumin','Lighting','Panel Sunk/Recessed 18W','pcs',3600],
+['dl-pr4','Dimo Lumin','Lighting','Panel Sunk/Recessed 24W Square','pcs',4490],
+['dl-pr5','Dimo Lumin','Lighting','Panel Sunk 40W Square 2x2','pcs',13700],
+['dl-t01','Dimo Lumin','Lighting','LED Tube T8 9W 2ft','pcs',1890],
+['dl-t02','Dimo Lumin','Lighting','LED Tube T8 18W 4ft','pcs',3130],
+['dl-t03','Dimo Lumin','Lighting','LED Batten T5 18W 4ft','pcs',4890],
+['dl-st1','Dimo Lumin','Lighting','Stick Lamp 9W E27','pcs',1410],
+['dl-st2','Dimo Lumin','Lighting','Stick Lamp 12W E27','pcs',1890],
+['dl-st3','Dimo Lumin','Lighting','Stick Lamp 14W E27','pcs',2320],
+['dl-cb1','Dimo Lumin','Lighting','Candle Bulb 3W E14/E27','pcs',800],
+['dl-cb2','Dimo Lumin','Lighting','Candle Bulb 5W E14/E27','pcs',900],
+['dl-co1','Dimo Lumin','Lighting','Colour LED Bulb 5W B22','pcs',190],
+['dl-sb1','Dimo Lumin','Lighting','Sensor LED Bulb 8W E27','pcs',3050],
+['dl-sb2','Dimo Lumin','Lighting','Sensor Panel 18W Surface Round','pcs',4670],
+['dl-dp1','Dimo Lumin','Lighting','Dimmable Panel 18W Surface Round','pcs',4670],
+['dl-hb1','Dimo Lumin','Lighting','High Bay 80W E40','pcs',19900],
+['dl-hb2','Dimo Lumin','Lighting','High Bay 100W 6500K','pcs',20650],
+['dl-hb3','Dimo Lumin','Lighting','High Bay 150W 6500K','pcs',32250],
+['dl-hb4','Dimo Lumin','Lighting','High Bay 200W 6500K','pcs',39500],
+['dl-sl1','Dimo Lumin','Lighting','Street Light 50W 6500K','pcs',16660],
+['dl-sl2','Dimo Lumin','Lighting','Street Light 100W 6500K','pcs',23550],
+['dl-sl3','Dimo Lumin','Lighting','Street Light 150W 6500K','pcs',33710],
+// DIMO LUMIN — Switches White
+['dl-w01','Dimo Lumin','Switches White','1G 1W Switch White ZCL811L','pcs',690],
+['dl-w02','Dimo Lumin','Switches White','1G 2W Switch White ZCL812L','pcs',1040],
+['dl-w03','Dimo Lumin','Switches White','2G 1W Switch White ZCL821L','pcs',950],
+['dl-w04','Dimo Lumin','Switches White','2G 2W Switch White ZCL822L','pcs',1520],
+['dl-w05','Dimo Lumin','Switches White','3G 1W Switch White ZCL831L','pcs',1260],
+['dl-w06','Dimo Lumin','Switches White','3G 2W Switch White ZCL832L','pcs',2010],
+['dl-w07','Dimo Lumin','Switches White','4G 1W Switch White ZCL841L','pcs',1870],
+['dl-w08','Dimo Lumin','Switches White','4G 2W Switch White ZCL842L','pcs',2480],
+['dl-w09','Dimo Lumin','Switches White','Bell Switch White ZCL8BL','pcs',1340],
+['dl-w10','Dimo Lumin','Switches White','20A DP Switch w/Indicator White','pcs',3700],
+['dl-w11','Dimo Lumin','Switches White','Light Dimmer White ZCLD500W','pcs',2890],
+['dl-w12','Dimo Lumin','Switches White','13A Socket w/Neon White','pcs',1910],
+['dl-w13','Dimo Lumin','Switches White','Double USB Charger White','pcs',4260],
+['dl-w14','Dimo Lumin','Switches White','Fan Regulator White ZCLS82A','pcs',3970],
+['dl-w15','Dimo Lumin','Switches White','Telephone Socket White','pcs',2510],
+['dl-w16','Dimo Lumin','Switches White','Data Socket White','pcs',4990],
+['dl-w17','Dimo Lumin','Switches White','Intermediate Switch White','pcs',2060],
+['dl-w18','Dimo Lumin','Switches White','TV Socket White','pcs',2510],
+['dl-w19','Dimo Lumin','Switches White','Blank Plate White ZCL800EP','pcs',490],
+// DIMO LUMIN — Switches Black
+['dl-b01','Dimo Lumin','Switches Black','1G 1W Switch Black ZCL811L/H','pcs',900],
+['dl-b02','Dimo Lumin','Switches Black','1G 2W Switch Black ZCL812L/H','pcs',1340],
+['dl-b03','Dimo Lumin','Switches Black','2G 1W Switch Black ZCL821L/H','pcs',1360],
+['dl-b04','Dimo Lumin','Switches Black','2G 2W Switch Black ZCL822L/H','pcs',1800],
+['dl-b05','Dimo Lumin','Switches Black','3G 1W Switch Black ZCL831L/H','pcs',1870],
+['dl-b06','Dimo Lumin','Switches Black','3G 2W Switch Black ZCL832L/H','pcs',2280],
+['dl-b07','Dimo Lumin','Switches Black','4G 1W Switch Black ZCL841L/H','pcs',2210],
+['dl-b08','Dimo Lumin','Switches Black','4G 2W Switch Black ZCL842L/H','pcs',2740],
+['dl-b09','Dimo Lumin','Switches Black','Bell Switch Black ZCL8BL/H','pcs',1610],
+['dl-b10','Dimo Lumin','Switches Black','20A DP Switch Black','pcs',3880],
+['dl-b11','Dimo Lumin','Switches Black','Light Dimmer Black','pcs',3180],
+['dl-b12','Dimo Lumin','Switches Black','13A Socket w/Neon Black','pcs',2270],
+['dl-b13','Dimo Lumin','Switches Black','Double USB Charger Black','pcs',4930],
+['dl-b14','Dimo Lumin','Switches Black','Fan Regulator Black','pcs',4170],
+['dl-b15','Dimo Lumin','Switches Black','Telephone Socket Black','pcs',2770],
+['dl-b16','Dimo Lumin','Switches Black','Data Socket Black','pcs',5640],
+['dl-b17','Dimo Lumin','Switches Black','Intermediate Switch Black','pcs',2480],
+['dl-b18','Dimo Lumin','Switches Black','TV Socket Black','pcs',2800],
+['dl-b19','Dimo Lumin','Switches Black','Blank Plate Black ZCL800EP/H','pcs',620],
+];
+const SUPPLIER_CATALOG = _SC.map(([id,sup,cat,name,unit,cost]) => ({id,sup,cat,name,unit,cost}));
+const SCATS_FOR = sup => { const src=sup==="All"?SUPPLIER_CATALOG:SUPPLIER_CATALOG.filter(i=>i.sup===sup); return ["All",...new Set(src.map(i=>i.cat))]; };
+const isCable = item => item.unit==="roll"||item.unit==="m"||item.cat==="Wires & Cables"||/cable|wire/i.test(item.cat+item.name);
+
+// ─── SVG Logo ─────────────────────────────────────────────────────────────────
+function NipponLogo({size=48,glow=false}) {
+  return (<svg width={size} height={size} viewBox="0 0 80 80" fill="none" className={glow?"glowAnim":""} style={{borderRadius:"20%",display:"block",flexShrink:0}}>
+    <defs><radialGradient id="bg1" cx="40%" cy="25%" r="70%"><stop offset="0%" stopColor="#FF3333"/><stop offset="100%" stopColor="#7A0000"/></radialGradient><radialGradient id="blb" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#FFEE88"/><stop offset="100%" stopColor="#FF9900" stopOpacity="0.5"/></radialGradient></defs>
+    <rect width="80" height="80" rx="18" fill="url(#bg1)"/>
+    <ellipse cx="26" cy="18" rx="18" ry="12" fill="rgba(255,255,255,0.08)" transform="rotate(-20 26 18)"/>
+    <ellipse cx="40" cy="33" rx="17" ry="17" fill="url(#blb)" opacity="0.45" className={glow?"bulbAnim":""}/>
+    <path d="M27 33 Q27 18 40 17 Q53 18 53 33 Q53 43 47.5 47 L32.5 47 Q27 43 27 33Z" fill="#FFF9E0" opacity="0.95"/>
+    <ellipse cx="34.5" cy="26" rx="4" ry="6" fill="white" opacity="0.25" transform="rotate(-22 34.5 26)"/>
+    <path d="M37.5 38.5 L37.5 33 Q40 30.5 42.5 33 L42.5 38.5" stroke="#E67E00" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
+    <rect x="33.5" y="47" width="13" height="3" rx="1.2" fill="#D4A800" opacity="0.9"/>
+    <rect x="33" y="50" width="14" height="2.5" rx="1.2" fill="#B8920A" opacity="0.9"/>
+    <rect x="34" y="52.5" width="12" height="2" rx="1" fill="#9A7A08" opacity="0.85"/>
+    <rect x="36.5" y="54.5" width="7" height="2.5" rx="1.5" fill="#7A6006" opacity="0.8"/>
+    <line x1="40" y1="10" x2="40" y2="14.5" stroke="#FFD700" strokeWidth="2" strokeLinecap="round" opacity="0.9"/>
+    <line x1="53" y1="13" x2="50.5" y2="16.5" stroke="#FFD700" strokeWidth="1.6" strokeLinecap="round" opacity="0.75"/>
+    <line x1="27" y1="13" x2="29.5" y2="16.5" stroke="#FFD700" strokeWidth="1.6" strokeLinecap="round" opacity="0.75"/>
+  </svg>);
+}
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+function Ic({n,s=20,c="currentColor"}) {
+  const P={strokeWidth:"2",fill:"none",stroke:c,width:s,height:s};
+  const icons={
+    home:<svg {...P} viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+    pos:<svg {...P} viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="7" y1="14" x2="7" y2="18"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="17" y1="14" x2="17" y2="18"/></svg>,
+    box:<svg {...P} viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>,
+    users:<svg {...P} viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+    chq:<svg {...P} viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="14" x2="10" y2="14"/></svg>,
+    logout:<svg {...P} viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+    plus:<svg {...P} strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    cart:<svg {...P} viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>,
+    del:<svg {...P} viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>,
+    edit:<svg {...P} viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+    ok:<svg {...P} strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>,
+    warn:<svg {...P} viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+    coin:<svg {...P} viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M9 9h4.5a2.5 2.5 0 0 1 0 5H9"/></svg>,
+    srch:<svg {...P} viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+    bldg:<svg {...P} viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>,
+    tag:<svg {...P} viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>,
+    dl:<svg {...P} viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+    print:<svg {...P} viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
+    back:<svg {...P} viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>,
+    close:<svg {...P} viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+    eye:<svg {...P} viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+    eyeoff:<svg {...P} viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+    phone:<svg {...P} viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.58 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
+    link:<svg {...P} viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+    exp:<svg {...P} viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
+    pencil:<svg {...P} viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>,
+    size:<svg {...P} viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 0 2 2z"/></svg>,
+  };
+  return icons[n]||icons.box;
+}
+
+// ─── UI Primitives ────────────────────────────────────────────────────────────
+function Btn({ch,onClick,col,sz="md",dis=false,full=false,st={}}) {
+  const bg=col||C.red, pd={sm:"6px 12px",md:"10px 18px",lg:"13px 22px"}[sz], fs={sm:11,md:13,lg:15}[sz];
+  return (<button onClick={onClick} disabled={dis}
+    style={{background:dis?"#333":bg,border:"none",borderRadius:10,padding:pd,color:"#fff",fontSize:fs,fontWeight:700,cursor:dis?"not-allowed":"pointer",opacity:dis?0.5:1,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,width:full?"100%":"auto",transition:"opacity 0.15s,transform 0.1s",...st}}
+    onMouseDown={e=>{if(!dis)e.currentTarget.style.transform="scale(0.97)";}}
+    onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}>{ch}</button>);
+}
+function Badge({ch,col=C.muted}) { return <span style={{background:col+"22",color:col,border:"1px solid "+col+"44",borderRadius:4,padding:"2px 7px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{ch}</span>; }
+function Card({ch,st={}}) { return <div style={{background:C.card,borderRadius:12,padding:14,border:"1px solid "+C.border,...st}}>{ch}</div>; }
+function Field({lbl,children}) { return (<div style={{marginBottom:14}}>{lbl&&<label style={{display:"block",fontSize:11,color:C.muted,marginBottom:5,letterSpacing:0.5,textTransform:"uppercase"}}>{lbl}</label>}{children}</div>); }
+const inpSt={width:"100%",background:"#242424",border:"1.5px solid "+C.border,borderRadius:8,padding:"11px 13px",color:"#f0f0f0",fontSize:14,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s",fontFamily:"inherit"};
+const focR=e=>e.target.style.borderColor="#CC0000", blrG=e=>e.target.style.borderColor="#2a2a2a";
+function Inp({lbl,val,set,ph="",type="text",req=false,onEnter}) {
+  return (<Field lbl={lbl&&(req?lbl+" *":lbl)}>
+    <input type={type} value={val} placeholder={ph} onChange={e=>set(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onEnter&&onEnter()} style={inpSt} onFocus={focR} onBlur={blrG}/>
+  </Field>);
+}
+function Sel({lbl,val,set,opts=[]}) {
+  return (<Field lbl={lbl}><select value={val} onChange={e=>set(e.target.value)} style={{...inpSt,appearance:"none"}}>
+    {opts.map((o,i)=>typeof o==="string"?<option key={i} value={o}>{o}</option>:<option key={i} value={o.v}>{o.l}</option>)}
+  </select></Field>);
+}
+function Textarea({lbl,val,set,ph}) {
+  return (<Field lbl={lbl}><textarea value={val} placeholder={ph} rows={3} onChange={e=>set(e.target.value)} style={{...inpSt,resize:"vertical"}} onFocus={focR} onBlur={blrG}/></Field>);
+}
+function Modal({open,onClose,title,ch}) {
+  if(!open)return null;
+  return (<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div onClick={e=>e.stopPropagation()} className="slideUp" style={{background:"#1a1a1a",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,maxHeight:"92vh",overflow:"auto",padding:22,borderTop:"3px solid "+C.red}}>
+      <div style={{width:38,height:4,background:"#2a2a2a",borderRadius:2,margin:"0 auto 16px"}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <h2 style={{fontSize:17,fontWeight:700}}>{title}</h2>
+        <button onClick={onClose} style={{background:"#2a2a2a",border:"none",borderRadius:8,padding:"6px 8px",cursor:"pointer"}}><Ic n="close" s={18} c="#888"/></button>
+      </div>
+      {ch}
+    </div>
+  </div>);
+}
+function Toast({t}) {
+  if(!t)return null;
+  const co={success:C.green,error:C.red,info:C.blue};
+  return (<div style={{position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",background:co[t.type]||C.blue,color:"#fff",padding:"11px 20px",borderRadius:14,zIndex:9999,fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:8,boxShadow:"0 8px 28px rgba(0,0,0,0.5)",animation:"toastIn 0.25s ease both",whiteSpace:"nowrap"}}>
+    <Ic n={t.type==="success"?"ok":"warn"} s={14} c="#fff"/>{t.msg}
+  </div>);
+}
+function StatBox({lbl,val,col,icon}) {
+  return (<div className="fadeUp" style={{flex:1,background:"#1a1a1a",borderRadius:12,padding:"13px 11px",border:"1px solid #2a2a2a",borderLeft:"3px solid "+col,position:"relative",overflow:"hidden"}}>
+    <div style={{position:"absolute",top:8,right:10,opacity:0.08}}><Ic n={icon} s={32} c={col}/></div>
+    <div style={{fontSize:10,color:"#888",letterSpacing:0.5,textTransform:"uppercase",marginBottom:4}}>{lbl}</div>
+    <div style={{fontSize:18,fontWeight:900,color:col,fontFamily:'"Space Mono",monospace'}}>{val}</div>
+  </div>);
+}
+function SectionHeader({title,right}) {
+  return (<div className="slideDown" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:12,borderBottom:"1px solid "+C.border}}>
+    <h2 style={{fontSize:16,fontWeight:900}}>{title}</h2>
+    {right&&<div style={{display:"flex",gap:8,alignItems:"center"}}>{right}</div>}
+  </div>);
+}
+function ExportMenu({onXLSX,onPDF}) {
+  const [open,setOpen]=useState(false);
+  return (<div style={{position:"relative"}}>
+    <Btn ch={<><Ic n="dl" s={13} c={C.green}/>Export</>} col="#252525" sz="sm" onClick={()=>setOpen(o=>!o)}/>
+    {open&&(<div className="popIn" onClick={()=>setOpen(false)} style={{position:"absolute",right:0,top:"110%",background:"#222",border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:200,minWidth:130,boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}}>
+      <button onClick={onXLSX} style={{display:"flex",alignItems:"center",gap:8,width:"100%",background:"none",border:"none",color:C.green,padding:"8px 12px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:700}}>Excel</button>
+      <button onClick={onPDF} style={{display:"flex",alignItems:"center",gap:8,width:"100%",background:"none",border:"none",color:C.red,padding:"8px 12px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:700}}>PDF</button>
+    </div>)}
+  </div>);
+}
+function Tabs({tabs,active,setActive}) {
+  return (<div style={{display:"flex",background:"#141414",borderBottom:"1px solid "+C.border}}>
+    {tabs.map(([v,label])=>(<button key={v} onClick={()=>setActive(v)} style={{flex:1,padding:"10px 4px",background:"none",border:"none",cursor:"pointer",color:active===v?C.red:"#888",fontWeight:active===v?700:400,fontSize:11,borderBottom:active===v?"2px solid "+C.red:"2px solid transparent",transition:"color 0.2s"}}>{label}</button>))}
+  </div>);
+}
+
+// ─── PRINT HELPER ─────────────────────────────────────────────────────────────
+function printDoc(htmlContent, sizeMode) {
+  const el = document.getElementById("bill-print");
+  el.style.display = "block";
+  let wrapStyle = "font-family:Arial,sans-serif;padding:16px;color:#000;background:#fff;";
+  if(sizeMode==="thermal80") wrapStyle += "max-width:300px;margin:0 auto;font-family:'Courier New',monospace;font-size:12px;";
+  else if(sizeMode==="thermal58") wrapStyle += "max-width:220px;margin:0 auto;font-family:'Courier New',monospace;font-size:10px;";
+  else if(sizeMode==="a5") wrapStyle += "max-width:148mm;margin:0 auto;font-size:11px;";
+  else wrapStyle += "max-width:210mm;margin:0 auto;"; // a4
+  el.innerHTML = "<div style='" + wrapStyle + "'>" + htmlContent + "</div>";
+  window.print();
+  setTimeout(()=>{ el.style.display="none"; el.innerHTML=""; }, 1500);
+}
+
+// ─── PRINT SIZE PICKER ────────────────────────────────────────────────────────
+function PrintSizePicker({open, onClose, onSelect}) {
+  if(!open) return null;
+  const sizes=[["a4","A4 Full Page","210mm × 297mm"],["a5","A5 Half Page","148mm × 210mm"],["thermal80","Thermal 80mm","POS Printer Wide"],["thermal58","Thermal 58mm","POS Printer Narrow"]];
+  return (<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:1100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div onClick={e=>e.stopPropagation()} className="slideUp" style={{background:"#1a1a1a",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,padding:22,borderTop:"3px solid "+C.blue}}>
+      <div style={{width:38,height:4,background:"#2a2a2a",borderRadius:2,margin:"0 auto 16px"}}/>
+      <h3 style={{fontSize:16,fontWeight:700,marginBottom:16,display:"flex",alignItems:"center",gap:10}}><Ic n="print" s={18} c={C.blue}/>Select Print Size</h3>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        {sizes.map(([v,label,desc])=>(<button key={v} onClick={()=>{onSelect(v);onClose();}} style={{background:"#242424",border:"1px solid "+C.border,borderRadius:12,padding:"14px 10px",cursor:"pointer",textAlign:"left",color:"#fff"}}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:3}}>{label}</div>
+          <div style={{fontSize:10,color:"#888"}}>{desc}</div>
+        </button>))}
+      </div>
+      <button onClick={onClose} style={{width:"100%",background:"#252525",border:"none",borderRadius:10,padding:"12px",color:"#888",fontSize:13,cursor:"pointer",marginTop:12}}>Cancel</button>
+    </div>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SETUP SCREEN
+// ═══════════════════════════════════════════════════════════════════════
+function SetupScreen({onConnected}) {
+  const [step,setStep]=useState(1), [url,setUrl]=useState(""), [key,setKey]=useState(""), [busy,setBusy]=useState(false), [err,setErr]=useState(""), [copied,setCopied]=useState(false);
+  const SQL=["create table if not exists users(id bigint primary key,data jsonb not null);","create table if not exists products(id bigint primary key,data jsonb not null);","create table if not exists sales(id bigint primary key,data jsonb not null);","create table if not exists cheques(id bigint primary key,data jsonb not null);","create table if not exists companies(id bigint primary key,data jsonb not null);","create table if not exists expenses(id bigint primary key,data jsonb not null);","alter table users disable row level security;","alter table products disable row level security;","alter table sales disable row level security;","alter table cheques disable row level security;","alter table companies disable row level security;","alter table expenses disable row level security;"].join("\n");
+  const copySQL=()=>{navigator.clipboard.writeText(SQL);setCopied(true);setTimeout(()=>setCopied(false),2500);};
+  const connect=async()=>{
+    if(!url.trim()||!key.trim()){setErr("Both fields required");return;}
+    setBusy(true);setErr("");
+    try{initSB(url.trim(),key.trim());await DB.getAll("users");saveCfg(url.trim(),key.trim());onConnected();}
+    catch(e){setErr("Connection failed: "+e.message);}
+    setBusy(false);
+  };
+  return (<div style={{minHeight:"100vh",background:"#0f0f0f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+    <div className="floatAnim" style={{marginBottom:24}}><NipponLogo size={80} glow={true}/></div>
+    <h1 style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4,letterSpacing:1}}>NIPPON ELECTRICALS</h1>
+    <p style={{color:"#888",marginBottom:28,fontSize:12}}>Smart POS — First Time Setup</p>
+    <div style={{width:"100%",maxWidth:440}}>
+      {step===1&&(<div style={{background:"#1a1a1a",borderRadius:16,padding:22,border:"1px solid #2a2a2a",marginBottom:16}}>
+        <h2 style={{fontSize:15,fontWeight:700,marginBottom:14}}>Step 1 — Setup Supabase Database</h2>
+        {[["1","Go to supabase.com and create a New Project"],["2","Open SQL Editor and click New Query"],["3","Paste the SQL script below and click RUN"],["4","Go to Project Settings → API and copy URL and Anon Key"]].map(([n,t])=>(<div key={n} style={{display:"flex",gap:10,marginBottom:10}}><div style={{width:24,height:24,borderRadius:"50%",background:C.red,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff",flexShrink:0}}>{n}</div><p style={{fontSize:13,lineHeight:1.5,paddingTop:3}}>{t}</p></div>))}
+        <div style={{background:"#0d1117",borderRadius:10,padding:12,border:"1px solid #2a2a2a",marginTop:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:10,color:"#888",textTransform:"uppercase",letterSpacing:1}}>SQL Script</span><button onClick={copySQL} style={{background:copied?C.green:"#2a2a2a",border:"none",borderRadius:6,padding:"4px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:700}}>{copied?"Copied!":"Copy SQL"}</button></div>
+          <pre style={{fontSize:9,color:"#7ee787",overflow:"auto",maxHeight:140,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap",fontFamily:'"Space Mono",monospace'}}>{SQL}</pre>
+        </div>
+      </div>)}
+      {step===1&&<Btn ch="Done — Next Step" onClick={()=>setStep(2)} full sz="lg"/>}
+      {step===2&&(<><div style={{background:"#1a1a1a",borderRadius:16,padding:22,border:"1px solid #2a2a2a",marginBottom:16}}>
+        <h2 style={{fontSize:15,fontWeight:700,marginBottom:4}}>Step 2 — Connect to Supabase</h2>
+        <p style={{fontSize:12,color:"#888",marginBottom:16,lineHeight:1.6}}>Find in: Supabase → Project Settings → API</p>
+        <Inp lbl="Project URL" val={url} set={setUrl} ph="https://xxxx.supabase.co" req/>
+        <Inp lbl="Anon / Public Key" val={key} set={setKey} ph="eyJhbGciOi..." req onEnter={connect}/>
+        {err&&<div style={{background:"#3a1a1a",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#ff8888",lineHeight:1.5,marginTop:4}}>{err}</div>}
+      </div>
+      <div style={{display:"flex",gap:10}}><Btn ch="Back" col="#252525" onClick={()=>setStep(1)} sz="lg"/><Btn ch={busy?"Connecting...":"Connect & Launch"} onClick={connect} dis={busy} st={{flex:1}} sz="lg"/></div></>)}
+    </div>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LOGIN PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function LoginPage() {
+  const {users,login,toast2}=useApp();
+  const [username,setUsername]=useState(""), [password,setPassword]=useState(""), [err,setErr]=useState(""), [busy,setBusy]=useState(false);
+  const doLogin=()=>{
+    const u=username.trim(), p=password;
+    if(!u||!p){setErr("Enter username and password");return;}
+    setBusy(true);setErr("");
+    setTimeout(()=>{
+      let found=null;
+      if(users&&users.length>0) found=users.find(x=>x.username===u&&x.password===p&&x.active!==false);
+      if(!found&&u==="admin"&&p==="admin123") found={id:1,name:"Admin",username:"admin",role:"admin",active:true,avatar:"A"};
+      if(found){login(found);}
+      else{setErr("Incorrect username or password. Try: admin / admin123");toast2("Login failed","error");}
+      setBusy(false);
+    },150);
+  };
+  const hk=e=>{if(e.key==="Enter")doLogin();};
+  return (<div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,background:"linear-gradient(160deg,#1a0000 0%,#0f0f0f 60%)"}}>
+    <div className="floatAnim" style={{marginBottom:20}}><NipponLogo size={88} glow={true}/></div>
+    <h1 style={{fontSize:22,fontWeight:900,letterSpacing:1,marginBottom:6,color:"#fff"}}>NIPPON ELECTRICALS</h1>
+    <p style={{color:"#888",marginBottom:32,fontSize:12}}>Smart Point of Sale System</p>
+    <div style={{width:"100%",maxWidth:360,background:"#1a1a1a",borderRadius:18,padding:28,border:"1px solid #2a2a2a",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+      <h2 style={{fontSize:16,fontWeight:700,marginBottom:22}}>Sign In</h2>
+      <div style={{marginBottom:14}}>
+        <label style={{display:"block",fontSize:11,color:"#888",marginBottom:6,letterSpacing:0.5,textTransform:"uppercase"}}>Username</label>
+        <input type="text" value={username} placeholder="Enter username" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck="false"
+          onChange={e=>{setUsername(e.target.value);setErr("");}} onKeyDown={hk}
+          style={{width:"100%",background:"#242424",border:"1.5px solid #2a2a2a",borderRadius:10,padding:"13px 15px",color:"#f0f0f0",fontSize:15,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s",fontFamily:"inherit"}}
+          onFocus={e=>e.target.style.borderColor="#CC0000"} onBlur={e=>e.target.style.borderColor="#2a2a2a"}/>
+      </div>
+      <div style={{marginBottom:20}}>
+        <label style={{display:"block",fontSize:11,color:"#888",marginBottom:6,letterSpacing:0.5,textTransform:"uppercase"}}>Password</label>
+        <input type="password" value={password} placeholder="Enter password" autoComplete="current-password"
+          onChange={e=>{setPassword(e.target.value);setErr("");}} onKeyDown={hk}
+          style={{width:"100%",background:"#242424",border:"1.5px solid #2a2a2a",borderRadius:10,padding:"13px 15px",color:"#f0f0f0",fontSize:15,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s",fontFamily:"inherit"}}
+          onFocus={e=>e.target.style.borderColor="#CC0000"} onBlur={e=>e.target.style.borderColor="#2a2a2a"}/>
+      </div>
+      {err&&(<div style={{background:"#3a1a1a",border:"1px solid #cc000055",borderRadius:8,padding:"10px 14px",marginBottom:18}}><p style={{color:"#ff8888",fontSize:13,textAlign:"center",margin:0}}>{err}</p></div>)}
+      <button onClick={doLogin} disabled={busy}
+        style={{width:"100%",background:busy?"#555":C.red,border:"none",borderRadius:10,padding:"14px",color:"#fff",fontSize:15,fontWeight:700,cursor:busy?"not-allowed":"pointer",letterSpacing:0.3,transition:"background 0.2s",fontFamily:"inherit"}}
+        onMouseDown={e=>{if(!busy)e.currentTarget.style.transform="scale(0.98)";}} onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}>
+        {busy?"Signing in...":"Login"}
+      </button>
+      <div style={{marginTop:18,background:"#242424",borderRadius:8,padding:"10px 14px",textAlign:"center"}}>
+        <p style={{color:"#888",fontSize:11,marginBottom:4}}>Default credentials</p>
+        <p style={{color:"#f0f0f0",fontSize:13,fontFamily:'"Space Mono",monospace',fontWeight:700}}>admin / admin123</p>
+      </div>
+    </div>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  NAV BAR
+// ═══════════════════════════════════════════════════════════════════════
+function Nav({pg,setPg,user}) {
+  const {logout}=useApp();
+  const doLogout=()=>{if(window.confirm("Log out of Nippon POS?"))logout();};
+  const base=[["dash","home","Home"],["pos","pos","POS"],["prod","box","Products"]];
+  const mgr=[["comp","bldg","Suppliers"],["chq","chq","Cheques"],["exp","exp","Expenses"],["quot","tag","Quote"]];
+  const adm=[["accts","users","Users"]];
+  const tabs=[...base,...(user.role!=="cashier"?mgr:[]),...(user.role==="admin"?adm:[])];
+  return (<nav style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"#141414",borderTop:"1px solid #2a2a2a",display:"flex",zIndex:500,paddingBottom:"env(safe-area-inset-bottom)"}}>
+    {tabs.map(([id,ic,lb])=>{
+      const act=pg===id;
+      return (<button key={id} onClick={()=>setPg(id)} style={{flex:1,padding:"9px 2px 7px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+        <div className={act?"navActive":""} style={{color:act?C.red:"#888",display:"flex"}}><Ic n={ic} s={18} c={act?C.red:"#888"}/></div>
+        <span style={{fontSize:8,color:act?C.red:"#888",fontWeight:act?700:400}}>{lb}</span>
+        {act&&<div style={{width:4,height:4,borderRadius:"50%",background:C.red}}/>}
+      </button>);
+    })}
+    <button onClick={doLogout} style={{flex:1,padding:"9px 2px 7px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+      <Ic n="logout" s={18} c="#ff6666"/>
+      <span style={{fontSize:8,color:"#ff6666"}}>Logout</span>
+    </button>
+  </nav>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════
+function Dashboard() {
+  const {user,products,sales,cheques,expenses}=useApp();
+  const todaySales=sales.filter(s=>s.date===today());
+  const todayRev=todaySales.reduce((a,s)=>a+s.total,0);
+  const month=today().slice(0,7);
+  const monthRev=sales.filter(s=>s.date&&s.date.startsWith(month)).reduce((a,s)=>a+s.total,0);
+  const monthExp=(expenses||[]).filter(e=>e.date&&e.date.startsWith(month)).reduce((a,e)=>a+e.amount,0);
+  const lowStock=products.filter(p=>p.active&&p.stock<=(p.minStock||10));
+  const pendCheques=cheques.filter(c=>c.status==="pending");
+  return (<div style={{paddingBottom:90}}>
+    <div className="slideDown" style={{background:"linear-gradient(135deg,"+C.red+" 0%,#7A0000 100%)",padding:"18px 16px",position:"relative",overflow:"hidden"}}>
+      <div style={{position:"absolute",top:-8,right:-10,opacity:0.07}}><NipponLogo size={100}/></div>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <NipponLogo size={48}/>
+        <div>
+          <p style={{fontSize:10,color:"#ffbbbb",letterSpacing:0.8}}>{new Date().toLocaleDateString("en-LK",{weekday:"long",day:"numeric",month:"short"})}</p>
+          <h1 style={{fontSize:17,fontWeight:900,color:"#fff",letterSpacing:0.5}}>NIPPON ELECTRICALS</h1>
+          <p style={{fontSize:11,color:"#ffcccc"}}>Hello {user.name} — {user.role.toUpperCase()}</p>
+        </div>
+      </div>
+    </div>
+    <div style={{padding:"14px 14px 0"}}>
+      <p style={{fontSize:10,color:"#888",letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Today</p>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <StatBox lbl="Today Revenue" val={lkrK(todayRev)} col={C.green} icon="coin"/>
+        <StatBox lbl="Today Sales" val={todaySales.length} col={C.blue} icon="pos"/>
+        <StatBox lbl="Month Revenue" val={lkrK(monthRev)} col={C.gold} icon="coin"/>
+        <StatBox lbl="Month Expenses" val={lkrK(monthExp)} col={C.red} icon="exp"/>
+      </div>
+      {pendCheques.length>0&&(<div style={{background:"#1a1500",border:"1px solid "+C.gold+"44",borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}><Ic n="chq" s={18} c={C.gold}/><span style={{fontSize:13,color:C.gold}}><strong>{pendCheques.length}</strong> pending cheques</span></div>)}
+      {lowStock.length>0&&(<div style={{background:"#1a0e00",border:"1px solid "+C.orange+"44",borderRadius:10,padding:"10px 14px",marginBottom:14}}>
+        <p style={{fontSize:12,color:C.orange,fontWeight:700,marginBottom:6}}>Low Stock Alert</p>
+        {lowStock.slice(0,4).map(p=><p key={p.id} style={{fontSize:12,marginBottom:2}}>{p.name} — {p.stock} {p.unit}</p>)}
+        {lowStock.length>4&&<p style={{fontSize:11,color:"#888"}}>+{lowStock.length-4} more</p>}
+      </div>)}
+      <div style={{background:"#1a1a1a",borderRadius:12,padding:"12px 14px",border:"1px solid #2a2a2a"}}>
+        <p style={{fontSize:11,color:"#888",letterSpacing:0.5,textTransform:"uppercase",marginBottom:10}}>Recent Sales</p>
+        {sales.length===0?<p style={{color:"#888",fontSize:12,textAlign:"center",padding:10}}>No sales yet</p>
+          :sales.slice(-5).reverse().map(s=>(<div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:8,marginBottom:8,borderBottom:"1px solid #2a2a2a"}}>
+            <div><p style={{fontSize:13,fontWeight:700}}>{s.customer}</p><p style={{fontSize:10,color:"#888"}}>{s.invoiceNo} · {s.date}</p></div>
+            <span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,color:C.green,fontSize:13}}>{lkr(s.total)}</span>
+          </div>))}
+      </div>
+    </div>
+  </div>);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  POS PAGE  — persistent cart, saved custom products, multi-bill flow
+// ═══════════════════════════════════════════════════════════════════════
+function POSPage({cartRef, onCheckoutDone}) {
+  const {products,user,onSaleComplete,toast2}=useApp();
+
+  // ── Persistent saved custom products (localStorage) ──────────────────
+  const [savedCustoms, setSavedCustoms] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("ne_custom_prods")||"[]"); }catch(e){ return []; }
+  });
+  const saveCustomProd = prod => {
+    const exists = savedCustoms.find(c=>c.name.toLowerCase()===prod.name.toLowerCase());
+    if(exists) return;
+    const updated = [...savedCustoms, prod];
+    setSavedCustoms(updated);
+    localStorage.setItem("ne_custom_prods", JSON.stringify(updated));
+  };
+  const removeCustomProd = id => {
+    const updated = savedCustoms.filter(c=>c.id!==id);
+    setSavedCustoms(updated);
+    localStorage.setItem("ne_custom_prods", JSON.stringify(updated));
+  };
+
+  // ── Persistent pinned catalog items ──────────────────────────────────
+  const [favs,setFavs]=useState(()=>{try{return JSON.parse(localStorage.getItem("ne_favs")||"[]");}catch(e){return [];}});
+  const toggleFav=id=>{const nf=favs.includes(id)?favs.filter(x=>x!==id):[...favs,id];setFavs(nf);localStorage.setItem("ne_favs",JSON.stringify(nf));};
+
+  // ── Cart state (shared via ref so App root can read without remounting) ─
+  const [cart,setCart]=useState(cartRef.current||[]);
+  useEffect(()=>{ cartRef.current=cart; },[cart]);
+
+  const [srch,setSrch]=useState("");
+  const [cust,setCust]=useState("Walk-in Customer");
+  const [pay,setPay]=useState("cash");
+  const [disc,setDisc]=useState("");
+  const [paid,setPaid]=useState("");
+  const [tab,setTab]=useState("products");
+  const [catFlt,setCatFlt]=useState("All");
+  const [chqNo,setChqNo]=useState("");
+  const [chqBk,setChqBk]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [badge,setBadge]=useState(0);
+  const [catSupFlt,setCatSupFlt]=useState("All");
+  const [catSrch,setCatSrch]=useState("");
+  const [cableModal,setCableModal]=useState(null);
+  const [cableM,setCableM]=useState("");
+  const [customModal,setCustomModal]=useState(false);
+  const [custItem,setCustItem]=useState({name:"",price:"",qty:"1",unit:"pcs"});
+  const [saveToList,setSaveToList]=useState(true);
+
+  const allCats=["All",...CATS];
+  // My Products = DB products + pinned catalog items + saved custom products
+  const dbProds=products.filter(p=>p.active&&(catFlt==="All"||p.category===catFlt)&&(!srch||p.name.toLowerCase().includes(srch.toLowerCase())));
+  const favCatItems=SUPPLIER_CATALOG.filter(i=>favs.includes(i.id)&&(catFlt==="All"||i.cat===catFlt)&&(!srch||i.name.toLowerCase().includes(srch.toLowerCase())));
+  const myCustoms=savedCustoms.filter(c=>!srch||c.name.toLowerCase().includes(srch.toLowerCase()));
+  const catalogProds=SUPPLIER_CATALOG.filter(i=>(catSupFlt==="All"||i.sup===catSupFlt)&&(!catSrch||i.name.toLowerCase().includes(catSrch.toLowerCase())));
+
+  const discN=Math.max(0,parseFloat(disc)||0);
+  const sub=cart.reduce((a,i)=>a+i.price*i.qty,0);
+  const tax=cart.reduce((a,i)=>a+(i.price*i.qty*(i.tax||0)/100),0);
+  const total=Math.max(0,sub+tax-discN);
+  const change=parseFloat(paid||0)-total;
+  const cnt=cart.reduce((a,i)=>a+i.qty,0);
+
+  const addToCart=item=>{
+    setCart(prev=>{
+      const ex=prev.find(i=>i.pid===item.pid);
+      if(ex){if(item.maxStock&&ex.qty>=item.maxStock){toast2("Max stock!","error");return prev;}return prev.map(i=>i.pid===item.pid?{...i,qty:i.qty+1}:i);}
+      return[...prev,item];
+    });
+    setBadge(k=>k+1);
+  };
+  const addDbProd=p=>{
+    if(p.stock<=0){toast2("Out of stock!","error");return;}
+    addToCart({pid:p.id,name:p.name,price:p.price,qty:1,tax:p.taxRate||0,sku:p.sku||"",maxStock:p.stock});
+    toast2(p.name.slice(0,22)+" added","success");
+  };
+  const addSavedCustom=c=>{
+    addToCart({pid:"sc_"+c.id,name:c.name,price:c.price,qty:1,tax:0,sku:"CUSTOM",unit:c.unit||"pcs",isCustom:true});
+    toast2(c.name.slice(0,22)+" added","success");
+  };
+  const addCatItem=item=>{
+    if(isCable(item)){const pricePerM=item.cost/100;setCableModal({item,pricePerM});setCableM("");return;}
+    addToCart({pid:"cat_"+item.id,name:item.name,price:Math.ceil(item.cost*1.25/10)*10,qty:1,tax:0,sku:item.id,unit:item.unit||"pcs"});
+    toast2(item.name.slice(0,22)+" added","success");
+  };
+  const confirmCableAdd=meters=>{
+    if(!cableModal)return;
+    const m=parseFloat(meters);if(!m||m<=0){toast2("Enter valid meters","error");return;}
+    const {item,pricePerM}=cableModal;
+    const sellPerM=Math.ceil(pricePerM*1.25*10)/10;
+    const pid="cat_"+item.id+"_"+m+"m";
+    setCart(prev=>{const ex=prev.find(i=>i.pid===pid);if(ex)return prev.map(i=>i.pid===pid?{...i,qty:i.qty+1}:i);return[...prev,{pid,name:item.name+" ("+m+"m)",price:Math.ceil(sellPerM*m/10)*10,qty:1,tax:0,sku:item.id,unit:"m",meters:m}];});
+    setBadge(k=>k+1);
+    toast2(item.name.slice(0,20)+" "+m+"m added","success");
+    setCableModal(null);
+  };
+  const addCustomItem=()=>{
+    if(!custItem.name.trim()||!custItem.price||isNaN(parseFloat(custItem.price))){toast2("Name and price required","error");return;}
+    const qty=parseInt(custItem.qty)||1;
+    const pid="custom_"+uid();
+    const newItem={pid,name:custItem.name.trim(),price:parseFloat(custItem.price),qty,tax:0,sku:"CUSTOM",unit:custItem.unit||"pcs",isCustom:true};
+    setCart(prev=>[...prev,newItem]);
+    setBadge(k=>k+1);
+    toast2(custItem.name.slice(0,22)+" added","success");
+    // Save to persistent custom products list
+    if(saveToList){
+      const savedProd={id:uid(),name:custItem.name.trim(),price:parseFloat(custItem.price),unit:custItem.unit||"pcs",createdAt:today()};
+      saveCustomProd(savedProd);
+    }
+    setCustItem({name:"",price:"",qty:"1",unit:"pcs"});
+    setSaveToList(true);
+    setCustomModal(false);
+  };
+  const updQty=(pid,d)=>setCart(prev=>prev.map(i=>i.pid===pid?{...i,qty:Math.max(1,i.qty+d)}:i));
+  const remItem=pid=>setCart(prev=>prev.filter(i=>i.pid!==pid));
+  // New Bill: just clear cart and go to products — DON'T remount
+  const newBill=()=>{
+    if(!cart.length){setTab("products");return;}
+    if(window.confirm("Clear cart and start new bill?")){
+      setCart([]);setDisc("");setPaid("");setChqNo("");setChqBk("");
+      setCust("Walk-in Customer");setPay("cash");setTab("products");
+    }
+  };
+
+  const checkout=async()=>{
+    if(!cart.length){toast2("Cart is empty!","error");return;}
+    if(pay==="cash"&&parseFloat(paid||0)<total){toast2("Amount paid is less!","error");return;}
+    if(pay==="cheque"&&(!chqNo||!chqBk)){toast2("Enter cheque details!","error");return;}
+    setBusy(true);
+    try{
+      const inv={id:uid(),date:today(),customer:cust.trim()||"Walk-in Customer",items:[...cart],subtotal:sub,taxAmount:tax,total,discount:discN,paid:parseFloat(paid||total),change:Math.max(0,change),paymentMode:pay,cashier:user.username,status:"completed",invoiceNo:"NE-"+today().replace(/-/g,"").slice(2)+"-"+String(uid()).slice(-4),chqDet:pay==="cheque"?{no:chqNo,bank:chqBk}:null,createdAt:new Date().toISOString()};
+      await onSaleComplete(inv);
+      // Reset cart for next bill (keeping the component mounted)
+      setCart([]);setDisc("");setPaid("");setChqNo("");setChqBk("");
+      setCust("Walk-in Customer");setPay("cash");
+      onCheckoutDone(inv); // tell App to show BillView overlay
+    }catch(e){toast2("Checkout failed: "+e.message,"error");}
+    setBusy(false);
+  };
+
+  const hasProducts = dbProds.length>0||favCatItems.length>0||myCustoms.length>0;
+
+  return (<div style={{height:"100vh",display:"flex",flexDirection:"column",paddingBottom:70}}>
+    {/* Header */}
+    <div style={{background:"#1a1a1a",padding:"10px 12px",borderBottom:"1px solid #2a2a2a",display:"flex",gap:7,alignItems:"center"}}>
+      <NipponLogo size={30}/>
+      <div style={{flex:1,fontWeight:900,fontSize:14}}>Point of Sale</div>
+      <button onClick={newBill} style={{background:"#1a3a1a",border:"1px solid "+C.green+"55",borderRadius:8,padding:"7px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:4,color:C.green,fontSize:11,fontWeight:700}}>
+        <Ic n="plus" s={13} c={C.green}/>New Bill
+      </button>
+      <button onClick={()=>setCustomModal(true)} style={{background:"#1a1a3a",border:"1px solid "+C.blue+"55",borderRadius:8,padding:"7px 9px",cursor:"pointer",display:"flex",alignItems:"center",gap:4,color:C.blue,fontSize:11,fontWeight:700}}>
+        <Ic n="pencil" s={13} c={C.blue}/>Custom
+      </button>
+      <button onClick={()=>setTab(t=>t==="cart"?"products":"cart")} style={{position:"relative",background:tab==="cart"?C.red:"#2a2a2a",border:"none",borderRadius:8,padding:"7px 10px",cursor:"pointer"}}>
+        <Ic n="cart" s={17} c="#fff"/>
+        {cnt>0&&<span key={badge} className="badgeAnim" style={{background:"#fff",color:C.red,borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",position:"absolute",top:-5,right:-5}}>{cnt}</span>}
+      </button>
+    </div>
+    <Tabs tabs={[["products","My Products"+(hasProducts?" ("+(dbProds.length+favCatItems.length+myCustoms.length)+")":"")],["catalog","Catalog"],["cart",cnt>0?"Cart ("+cnt+")":"Cart"]]} active={tab} setActive={setTab}/>
+
+    {/* ─── MY PRODUCTS TAB ─── */}
+    {tab==="products"&&(<div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"8px 12px",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>
+        <div style={{position:"relative",marginBottom:7}}>
+          <div style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)"}}><Ic n="srch" s={13} c="#888"/></div>
+          <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search all products..." style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 10px 8px 30px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/>
+        </div>
+        <div style={{display:"flex",gap:5,overflow:"auto"}}>
+          {allCats.map(c=><button key={c} onClick={()=>setCatFlt(c)} style={{background:catFlt===c?C.red:"#2a2a2a",border:"none",borderRadius:16,padding:"4px 11px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:catFlt===c?700:400,flexShrink:0}}>{c}</button>)}
+        </div>
+      </div>
+      <div style={{flex:1,overflow:"auto",padding:"8px 10px"}}>
+        {!hasProducts&&(<div style={{textAlign:"center",color:"#888",padding:"30px 20px"}}>
+          <Ic n="box" s={44} c="#888"/>
+          <p style={{marginTop:12,fontSize:14,fontWeight:700,color:"#f0f0f0"}}>No products yet</p>
+          <p style={{fontSize:12,marginTop:6,lineHeight:1.8,color:"#888"}}>3 ways to add products:<br/>① Add to DB in <b style={{color:"#fff"}}>Products tab</b><br/>② Pin catalog items with ⭐ in <b style={{color:"#fff"}}>Catalog tab</b><br/>③ Tap <b style={{color:C.blue}}>Custom</b> button above to add custom items</p>
+          <div style={{display:"flex",gap:10,justifyContent:"center",marginTop:16}}>
+            <Btn ch="Go to Catalog" col={C.red} onClick={()=>setTab("catalog")} sz="sm"/>
+            <Btn ch={<><Ic n="pencil" s={12} c="#fff"/>Custom Item</>} col={C.blue} onClick={()=>setCustomModal(true)} sz="sm"/>
+          </div>
+        </div>)}
+
+        {/* Section: Saved Custom Products */}
+        {myCustoms.length>0&&(<div style={{marginBottom:4}}>
+          <div style={{fontSize:9,color:C.blue,letterSpacing:1,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:5}}>
+            <Ic n="pencil" s={10} c={C.blue}/>Saved Custom Items
+          </div>
+          {myCustoms.map((c,i)=>{
+            const inCart=cart.find(x=>x.pid==="sc_"+c.id);
+            return (<div key={c.id} className="fadeUp" style={{background:inCart?"#0d1a2a":"#1a1a2a",borderRadius:10,padding:"9px 12px",marginBottom:6,border:"1px solid "+(inCart?C.blue+"88":"#2a2a44"),display:"flex",alignItems:"center",gap:10,animationDelay:i*0.025+"s"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:2}}>{c.name}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={{background:C.blue+"22",color:C.blue,border:"1px solid "+C.blue+"44",borderRadius:3,padding:"1px 5px",fontSize:9,fontWeight:700}}>CUSTOM</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.blue,fontFamily:'"Space Mono",monospace'}}>{lkr(c.price)}/{c.unit}</span>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <button onClick={()=>removeCustomProd(c.id)} title="Remove from saved" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#555",padding:"2px 4px"}}>🗑</button>
+                <div onClick={()=>addSavedCustom(c)} style={{background:inCart?C.blue:C.red,borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:16,cursor:"pointer",flexShrink:0}}>{inCart?inCart.qty:"+"}</div>
+              </div>
+            </div>);
+          })}
+          {(favCatItems.length>0||dbProds.length>0)&&<div style={{borderBottom:"1px solid #2a2a2a",marginBottom:10,marginTop:6}}/>}
+        </div>)}
+
+        {/* Section: Pinned Catalog items */}
+        {favCatItems.length>0&&(<div style={{marginBottom:4}}>
+          <div style={{fontSize:9,color:C.gold,letterSpacing:1,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:5}}>
+            ⭐ Quick Sell (Catalog Pinned)
+          </div>
+          {favCatItems.map((item,i)=>{
+            const inCart=cart.find(c=>c.pid==="cat_"+item.id||c.pid.startsWith("cat_"+item.id+"_"));
+            const sc=SUP_COL[item.sup]||"#888"; const cable=isCable(item);
+            return (<div key={item.id} className="fadeUp" onClick={()=>addCatItem(item)} style={{background:inCart?"#1a1000":"#1a1a1a",borderRadius:10,padding:"9px 12px",marginBottom:6,border:"1px solid "+(inCart?C.gold+"88":"#3a3a00"),display:"flex",alignItems:"center",gap:10,cursor:"pointer",animationDelay:i*0.025+"s"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{item.name}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{background:sc+"22",color:sc,border:"1px solid "+sc+"44",borderRadius:3,padding:"1px 5px",fontSize:9,fontWeight:700}}>{item.sup}</span>
+                  {cable&&<span style={{fontSize:9,color:C.gold}}>📏 Per Meter</span>}
+                  <span style={{fontSize:11,fontWeight:700,color:C.red,fontFamily:'"Space Mono",monospace'}}>Rs.{Math.ceil(item.cost*1.25/10)*10}/{cable?"m":item.unit}</span>
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
+                <div style={{background:inCart?C.gold:C.red,borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:cable?10:16}}>{cable?"📏":"+"}</div>
+                <button onClick={e=>{e.stopPropagation();toggleFav(item.id);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:C.gold,padding:0}}>✕ unpin</button>
+              </div>
+            </div>);
+          })}
+          {dbProds.length>0&&<div style={{borderBottom:"1px solid #2a2a2a",marginBottom:10,marginTop:6}}/>}
+        </div>)}
+
+        {/* Section: DB Products */}
+        {dbProds.length>0&&(<div>
+          {(favCatItems.length>0||myCustoms.length>0)&&<div style={{fontSize:9,color:"#888",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Stock Products</div>}
+          {dbProds.map((p,i)=>{
+            const inCart=cart.find(c=>c.pid===p.id);
+            return (<div key={p.id} className="fadeUp" onClick={()=>addDbProd(p)} style={{background:inCart?"#1a1000":"#1a1a1a",borderRadius:10,padding:"10px 12px",marginBottom:7,border:"1px solid "+(inCart?C.gold+"88":"#2a2a2a"),display:"flex",alignItems:"center",gap:10,cursor:"pointer",animationDelay:Math.min(i,20)*0.025+"s"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:3}}>{p.name}</div>
+                <div style={{display:"flex",gap:7,alignItems:"center"}}>
+                  <span style={{fontSize:13,fontWeight:900,color:C.red,fontFamily:'"Space Mono",monospace'}}>{lkr(p.price)}</span>
+                  <span style={{fontSize:10,color:p.stock<=(p.minStock||10)?C.orange:"#888"}}>Stk: {p.stock}</span>
+                </div>
+              </div>
+              <div style={{background:inCart?C.gold:C.red,borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:16,flexShrink:0}}>{inCart?inCart.qty:"+"}</div>
+            </div>);
+          })}
+        </div>)}
+      </div>
+    </div>)}
+
+    {/* ─── CATALOG TAB ─── */}
+    {tab==="catalog"&&(<div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"8px 12px 6px",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>
+        <div style={{position:"relative",marginBottom:7}}>
+          <div style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)"}}><Ic n="srch" s={13} c="#888"/></div>
+          <input value={catSrch} onChange={e=>setCatSrch(e.target.value)} placeholder="Search catalog..." style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 10px 8px 30px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/>
+        </div>
+        <div style={{display:"flex",gap:5,overflow:"auto"}}>
+          {SSUPS.map(s=><button key={s} onClick={()=>setCatSupFlt(s)} style={{background:catSupFlt===s?C.red:"#2a2a2a",border:"none",borderRadius:14,padding:"4px 10px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:catSupFlt===s?700:400,flexShrink:0}}>{s}</button>)}
+        </div>
+      </div>
+      <div style={{padding:"4px 12px",fontSize:10,color:"#888",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>{catalogProds.length} items · ⭐ pin to My Products · 📏 cables sold by meter</div>
+      <div style={{flex:1,overflow:"auto",padding:"8px 10px"}}>
+        {catalogProds.map((item,i)=>{
+          const inCart=cart.find(c=>c.pid==="cat_"+item.id||c.pid.startsWith("cat_"+item.id+"_"));
+          const sc=SUP_COL[item.sup]||"#888"; const cable=isCable(item); const pinned=favs.includes(item.id);
+          return (<div key={item.id} className="fadeUp" style={{background:inCart?"#1a1000":"#1a1a1a",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid "+(inCart?C.gold+"88":"#2a2a2a"),display:"flex",alignItems:"center",gap:10,animationDelay:Math.min(i,20)*0.02+"s"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:700,lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{background:sc+"22",color:sc,border:"1px solid "+sc+"44",borderRadius:3,padding:"1px 6px",fontSize:9,fontWeight:700}}>{item.sup}</span>
+                {cable&&<span style={{background:C.gold+"22",color:C.gold,border:"1px solid "+C.gold+"44",borderRadius:3,padding:"1px 5px",fontSize:9}}>📏 Cable</span>}
+                <span style={{fontSize:10,color:"#888"}}>MRP: {lkr(item.cost)}{cable?"/roll":"/"+item.unit}</span>
+              </div>
+              {cable&&<div style={{fontSize:10,color:"#888",marginTop:2}}>≈ {lkr(Math.ceil(item.cost/100*1.25*10)/10)}/m sell price</div>}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"center"}}>
+              <button onClick={()=>addCatItem(item)} style={{background:inCart?C.gold:C.red,border:"none",borderRadius:8,width:34,height:34,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:inCart?"#000":"#fff",fontSize:cable?12:16}}>{cable?"📏":(inCart?cart.filter(c=>c.pid.startsWith("cat_"+item.id)).reduce((a,c)=>a+c.qty,0):"+")} </button>
+              <button onClick={()=>toggleFav(item.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:15,padding:0,opacity:pinned?1:0.3}} title={pinned?"Unpin":"Pin to My Products"}>{pinned?"⭐":"☆"}</button>
+            </div>
+          </div>);
+        })}
+      </div>
+    </div>)}
+
+    {/* ─── CART TAB ─── */}
+    {tab==="cart"&&(<div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column"}}>
+      <div style={{flex:1,overflow:"auto",padding:12}}>
+        <div style={{marginBottom:12}}>
+          <label style={{display:"block",fontSize:11,color:"#888",marginBottom:5,textTransform:"uppercase",letterSpacing:0.5}}>Customer Name</label>
+          <input value={cust} onChange={e=>setCust(e.target.value)} style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"10px 13px",color:"#f0f0f0",fontSize:14,outline:"none",fontFamily:"inherit"}}/>
+        </div>
+        {cart.length===0?(<div style={{textAlign:"center",color:"#888",padding:40}}>
+          <Ic n="cart" s={44} c="#888"/>
+          <p style={{marginTop:12,fontSize:13}}>Cart is empty</p>
+          <div style={{display:"flex",gap:10,justifyContent:"center",marginTop:14}}>
+            <Btn ch="Browse Products" col={C.red} onClick={()=>setTab("products")} sz="sm"/>
+            <Btn ch={<><Ic n="pencil" s={12} c="#fff"/>Custom Item</>} col={C.blue} onClick={()=>setCustomModal(true)} sz="sm"/>
+          </div>
+        </div>):cart.map((item,i)=>(<div key={item.pid} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:12,marginBottom:8,border:"1px solid #2a2a2a",animationDelay:i*0.03+"s"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:2,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                {item.name}
+                {item.isCustom&&<span style={{background:C.blue+"22",color:C.blue,border:"1px solid "+C.blue+"44",borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>CUSTOM</span>}
+              </div>
+              <div style={{fontSize:11,color:"#888"}}>{lkr(item.price)} each</div>
+            </div>
+            <button onClick={()=>remItem(item.pid)} style={{background:"#3a1a1a",border:"none",borderRadius:6,padding:"5px 7px",cursor:"pointer"}}><Ic n="del" s={14} c={C.red}/></button>
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",background:"#242424",borderRadius:10,overflow:"hidden"}}>
+              <button onClick={()=>updQty(item.pid,-1)} style={{background:"none",border:"none",padding:"7px 14px",cursor:"pointer",color:C.red,fontSize:18,fontWeight:700}}>-</button>
+              <span style={{fontFamily:'"Space Mono",monospace',fontWeight:700,minWidth:24,textAlign:"center",fontSize:15}}>{item.qty}</span>
+              <button onClick={()=>updQty(item.pid,1)} style={{background:"none",border:"none",padding:"7px 14px",cursor:"pointer",color:C.green,fontSize:18,fontWeight:700}}>+</button>
+            </div>
+            <div style={{fontFamily:'"Space Mono",monospace',fontWeight:700,fontSize:14}}>{lkr(item.price*item.qty)}</div>
+          </div>
+        </div>))}
+      </div>
+      {cart.length>0&&(<div style={{background:"#141414",padding:14,borderTop:"1px solid #2a2a2a"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,fontSize:13}}><span style={{color:"#888"}}>Subtotal</span><span style={{fontFamily:'"Space Mono",monospace'}}>{lkr(sub)}</span></div>
+        <input value={disc} onChange={e=>setDisc(e.target.value)} type="number" min="0" placeholder="Discount (Rs.)" style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 12px",color:"#f0f0f0",fontSize:13,outline:"none",marginBottom:8,fontFamily:"inherit"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #2a2a2a",paddingTop:8,marginBottom:10}}>
+          <span style={{fontWeight:700,fontSize:15}}>TOTAL</span>
+          <span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,fontSize:20,color:C.red}}>{lkr(total)}</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:10}}>
+          {["cash","card","upi","cheque"].map(m=>(<button key={m} onClick={()=>setPay(m)} style={{background:pay===m?C.red:"#2a2a2a",border:"none",borderRadius:8,padding:"7px 2px",color:"#fff",fontSize:10,cursor:"pointer",fontWeight:pay===m?700:400,textTransform:"uppercase",transform:pay===m?"scale(1.05)":"scale(1)"}}>{m}</button>))}
+        </div>
+        {pay==="cash"&&(<div style={{marginBottom:10}}>
+          <input value={paid} onChange={e=>setPaid(e.target.value)} type="number" placeholder="Amount paid (Rs.)" style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"9px 12px",color:"#f0f0f0",fontSize:14,outline:"none",marginBottom:4,fontFamily:"inherit"}}/>
+          {paid&&<div style={{fontSize:12,color:change>=0?C.green:C.red,fontWeight:700}}>Change: {lkr(Math.abs(change))}{change<0?" (Short)":""}</div>}
+        </div>)}
+        {pay==="cheque"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          <input value={chqNo} onChange={e=>setChqNo(e.target.value)} placeholder="Cheque No." style={{background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"9px 12px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/>
+          <select value={chqBk} onChange={e=>setChqBk(e.target.value)} style={{background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"9px 8px",color:chqBk?"#f0f0f0":"#888",fontSize:12,outline:"none"}}>
+            <option value="">Select Bank</option>
+            {BANKS.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>)}
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>{setCart([]);setDisc("");setPaid("");}} style={{flex:1,background:"#252525",border:"none",borderRadius:10,padding:"12px",color:"#fff",fontSize:13,cursor:"pointer",fontWeight:700}}>Clear</button>
+          <button onClick={checkout} disabled={busy} style={{flex:2,background:busy?"#555":C.green,border:"none",borderRadius:10,padding:"12px",color:"#fff",fontSize:14,cursor:busy?"not-allowed":"pointer",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>
+            {busy?"Processing...":<><Ic n="ok" s={14} c="#fff"/>Checkout</>}
+          </button>
+        </div>
+      </div>)}
+    </div>)}
+
+    {/* ─── Cable Modal ─── */}
+    {cableModal&&(<div onClick={()=>setCableModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={e=>e.stopPropagation()} className="slideUp" style={{background:"#1a1a1a",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,padding:22,borderTop:"3px solid "+C.gold}}>
+        <div style={{width:38,height:4,background:"#2a2a2a",borderRadius:2,margin:"0 auto 14px"}}/>
+        <div style={{fontWeight:900,fontSize:15,marginBottom:3}}>📏 {cableModal.item.name}</div>
+        <div style={{fontSize:11,color:"#888",marginBottom:12}}>1 Roll = 100m · Sell: Rs.{Math.ceil(cableModal.pricePerM*1.25*10)/10}/m</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:7,marginBottom:14}}>
+          {[10,20,50,60,100].map(m=>(<button key={m} onClick={()=>setCableM(String(m))} style={{background:cableM===String(m)?C.gold:"#252525",border:"1px solid "+(cableM===String(m)?C.gold:"#2a2a2a"),borderRadius:10,padding:"10px 2px",cursor:"pointer",color:cableM===String(m)?"#000":"#fff",fontWeight:700,fontSize:11}}>{m}m</button>))}
+        </div>
+        <input type="number" value={cableM} onChange={e=>setCableM(e.target.value)} placeholder="Custom meters..." style={{width:"100%",background:"#242424",border:"1.5px solid #2a2a2a",borderRadius:10,padding:"12px 14px",color:"#f0f0f0",fontSize:15,outline:"none",marginBottom:12,boxSizing:"border-box",fontFamily:"inherit"}} onFocus={e=>e.target.style.borderColor=C.gold} onBlur={e=>e.target.style.borderColor="#2a2a2a"}/>
+        {cableM&&parseFloat(cableM)>0&&<div style={{background:"#1a1500",border:"1px solid "+C.gold+"44",borderRadius:8,padding:"9px 14px",marginBottom:12,display:"flex",justifyContent:"space-between"}}><span style={{color:"#888",fontSize:13}}>{cableM}m total</span><span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,fontSize:16,color:C.gold}}>{lkr(Math.ceil(Math.ceil(cableModal.pricePerM*1.25*10)/10*parseFloat(cableM)/10)*10)}</span></div>}
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setCableModal(null)} style={{flex:1,background:"#252525",border:"none",borderRadius:10,padding:"13px",color:"#fff",cursor:"pointer",fontWeight:700}}>Cancel</button>
+          <button onClick={()=>confirmCableAdd(cableM)} disabled={!cableM||parseFloat(cableM)<=0} style={{flex:2,background:(!cableM||parseFloat(cableM)<=0)?"#333":C.gold,border:"none",borderRadius:10,padding:"13px",color:(!cableM||parseFloat(cableM)<=0)?"#888":"#000",fontWeight:900,cursor:(!cableM||parseFloat(cableM)<=0)?"not-allowed":"pointer"}}>Add {cableM||"0"}m to Cart</button>
+        </div>
+      </div>
+    </div>)}
+
+    {/* ─── Custom Item Modal ─── */}
+    {customModal&&(<div onClick={()=>setCustomModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={e=>e.stopPropagation()} className="slideUp" style={{background:"#1a1a1a",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,padding:22,borderTop:"3px solid "+C.blue}}>
+        <div style={{width:38,height:4,background:"#2a2a2a",borderRadius:2,margin:"0 auto 14px"}}/>
+        <div style={{fontWeight:900,fontSize:16,marginBottom:4,display:"flex",alignItems:"center",gap:8}}><Ic n="pencil" s={18} c={C.blue}/>Add Custom Item</div>
+        <p style={{fontSize:12,color:"#888",marginBottom:14}}>Item not in product list or catalog</p>
+        <Inp lbl="Item Name *" val={custItem.name} set={v=>setCustItem(p=>({...p,name:v}))} ph="e.g. Special Conduit Fitting"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Inp lbl="Price (Rs.) *" val={custItem.price} set={v=>setCustItem(p=>({...p,price:v}))} type="number" ph="0.00"/>
+          <Inp lbl="Qty" val={custItem.qty} set={v=>setCustItem(p=>({...p,qty:v}))} type="number" ph="1"/>
+        </div>
+        <Sel lbl="Unit" val={custItem.unit} set={v=>setCustItem(p=>({...p,unit:v}))} opts={["pcs","m","roll","kg","box","set","pair"]}/>
+        {custItem.name&&custItem.price&&(<div style={{background:C.blue+"11",border:"1px solid "+C.blue+"33",borderRadius:8,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between"}}><span style={{color:"#888",fontSize:12}}>Total for {custItem.qty||1} {custItem.unit}</span><span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,color:C.blue}}>{lkr(parseFloat(custItem.price||0)*parseInt(custItem.qty||1))}</span></div>)}
+        {/* Save to list toggle */}
+        <div onClick={()=>setSaveToList(v=>!v)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#242424",borderRadius:8,marginBottom:14,cursor:"pointer",border:"1px solid "+(saveToList?C.blue+"44":"#2a2a2a")}}>
+          <div style={{width:20,height:20,borderRadius:5,background:saveToList?C.blue:"#333",border:"2px solid "+(saveToList?C.blue:"#555"),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            {saveToList&&<Ic n="ok" s={12} c="#fff"/>}
+          </div>
+          <div>
+            <div style={{fontSize:13,fontWeight:700}}>Save to My Products list</div>
+            <div style={{fontSize:10,color:"#888"}}>Available for all future bills</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setCustomModal(false)} style={{flex:1,background:"#252525",border:"none",borderRadius:10,padding:"13px",color:"#fff",cursor:"pointer",fontWeight:700}}>Cancel</button>
+          <button onClick={addCustomItem} style={{flex:2,background:C.blue,border:"none",borderRadius:10,padding:"13px",color:"#fff",fontWeight:900,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>
+            <Ic n="plus" s={14} c="#fff"/>Add to Cart
+          </button>
+        </div>
+      </div>
+    </div>)}
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  BILL VIEW OVERLAY (rendered over POS, not replacing it)
+// ═══════════════════════════════════════════════════════════════════════
+function BillView({sale, onNewSale}) {
+  const [showPrintPicker,setShowPrintPicker]=useState(false);
+
+  const buildBillHTML=size=>{
+    const isT=size==="thermal80"||size==="thermal58";
+    const items=sale.items.map(i=>"<tr style='border-bottom:1px solid #eee'><td style='padding:5px 3px;font-size:"+(isT?"10":"11")+"px'>"+i.name+(i.isCustom?" *":"")+"</td><td style='text-align:center;padding:5px 3px;font-size:"+(isT?"10":"11")+"px'>"+i.qty+"</td><td style='text-align:right;padding:5px 3px;font-size:"+(isT?"10":"11")+"px'>Rs."+Number(i.price).toFixed(2)+"</td><td style='text-align:right;padding:5px 3px;font-size:"+(isT?"10":"11")+"px;font-weight:700'>Rs."+Number(i.price*i.qty).toFixed(2)+"</td></tr>").join("");
+    const brand=isT
+      ?"<div style='text-align:center;border-bottom:2px solid #CC0000;padding-bottom:8px;margin-bottom:8px'><div style='font-size:16px;font-weight:900;letter-spacing:2px;color:#CC0000'>NIPPON ELECTRICALS</div><div style='font-size:9px;color:#555;margin-top:2px'>Point of Sale Receipt</div><div style='font-size:9px;margin-top:4px'>Invoice: <b>"+sale.invoiceNo+"</b> · "+sale.date+"</div><div style='font-size:9px'>Customer: <b>"+sale.customer+"</b></div></div>"
+      :"<div style='background:linear-gradient(135deg,#CC0000,#7A0000);color:#fff;padding:20px;margin-bottom:18px'><div style='font-size:22px;font-weight:900;letter-spacing:1px;margin-bottom:4px'>💡 NIPPON ELECTRICALS</div><div style='font-size:11px;opacity:0.8'>Tax Invoice / Receipt</div></div><div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 16px;font-size:11px'><div><div style='color:#888;font-size:9px;text-transform:uppercase'>Invoice</div><div style='font-weight:700;color:#CC0000;font-size:13px'>"+sale.invoiceNo+"</div></div><div><div style='color:#888;font-size:9px;text-transform:uppercase'>Date</div><div style='font-weight:700;font-size:13px'>"+sale.date+"</div></div><div><div style='color:#888;font-size:9px;text-transform:uppercase'>Customer</div><div style='font-weight:700;font-size:13px'>"+sale.customer+"</div></div><div><div style='color:#888;font-size:9px;text-transform:uppercase'>Cashier</div><div style='font-weight:700;font-size:13px'>"+sale.cashier+"</div></div></div>";
+    const tbl="<table style='width:100%;border-collapse:collapse;"+(isT?"":"margin:0 16px;width:calc(100% - 32px)")+"'><thead><tr style='background:#CC0000;color:#fff'><th style='padding:"+(isT?"5px 3px":"8px 12px")+";text-align:left;font-size:"+(isT?"9":"11")+"px'>Item</th><th style='padding:"+(isT?"5px 3px":"8px 12px")+";text-align:center;font-size:"+(isT?"9":"11")+"px'>Qty</th><th style='padding:"+(isT?"5px 3px":"8px 12px")+";text-align:right;font-size:"+(isT?"9":"11")+"px'>Price</th><th style='padding:"+(isT?"5px 3px":"8px 12px")+";text-align:right;font-size:"+(isT?"9":"11")+"px'>Total</th></tr></thead><tbody>"+items+"</tbody></table>";
+    const totals="<div style='"+(isT?"":"padding:0 16px")+"margin-top:12px;border-top:2px solid #CC0000;padding-top:8px'>"+(sale.discount>0?"<div style='display:flex;justify-content:space-between;font-size:"+(isT?"10":"12")+"px;color:#CC0000;margin-bottom:3px'><span>Discount</span><span>- Rs."+Number(sale.discount).toFixed(2)+"</span></div>":"")+"<div style='display:flex;justify-content:space-between;font-size:"+(isT?"14":"18")+"px;font-weight:900;color:#CC0000;margin-top:4px'><span>TOTAL</span><span>Rs."+Number(sale.total).toFixed(2)+"</span></div><div style='display:flex;justify-content:space-between;font-size:"+(isT?"9":"12")+"px;color:#555;margin-top:5px'><span>Payment: "+sale.paymentMode.toUpperCase()+"</span><span>Rs."+Number(sale.paid).toFixed(2)+"</span></div>"+(sale.paymentMode==="cash"&&sale.change>0?"<div style='display:flex;justify-content:space-between;font-size:"+(isT?"9":"12")+"px;color:#555'><span>Change</span><span>Rs."+Number(sale.change).toFixed(2)+"</span></div>":"")+"</div>";
+    const footer=isT?"<div style='text-align:center;margin-top:12px;font-size:9px;color:#888;border-top:1px dashed #ccc;padding-top:8px'>Thank you! · Nippon Electricals</div>":"<div style='margin:20px 16px 0;padding:14px;background:#fff5f5;border-radius:10px;border:1px solid #CC000022;text-align:center'><p style='font-size:12px;color:#CC0000;font-weight:700'>Thank you for choosing Nippon Electricals!</p></div>";
+    return brand+tbl+totals+footer;
+  };
+
+  return (<div style={{position:"fixed",inset:0,background:C.dark,zIndex:800,overflow:"auto",paddingBottom:20,maxWidth:480,margin:"0 auto"}}>
+    <div style={{background:"linear-gradient(135deg,"+C.red+" 0%,#7A0000 100%)",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+      <NipponLogo size={38}/>
+      <div style={{flex:1}}><div style={{fontWeight:900,fontSize:16,color:"#fff"}}>✅ Sale Complete!</div><div style={{fontSize:11,color:"#ffcccc"}}>{sale.invoiceNo}</div></div>
+      <button onClick={()=>setShowPrintPicker(true)} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",borderRadius:10,padding:"8px 14px",cursor:"pointer",color:"#fff",fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
+        <Ic n="print" s={14} c="#fff"/>Print
+      </button>
+    </div>
+    <div style={{padding:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <div style={{background:"linear-gradient(135deg,"+C.green+"22,"+C.green+"11)",border:"1px solid "+C.green+"44",borderRadius:14,padding:14}}><div style={{fontSize:10,color:C.green,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Total</div><div style={{fontSize:22,fontWeight:900,color:C.green,fontFamily:'"Space Mono",monospace'}}>{lkr(sale.total)}</div></div>
+        <div style={{background:"linear-gradient(135deg,"+C.blue+"22,"+C.blue+"11)",border:"1px solid "+C.blue+"44",borderRadius:14,padding:14}}><div style={{fontSize:10,color:C.blue,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Items Sold</div><div style={{fontSize:22,fontWeight:900,color:C.blue,fontFamily:'"Space Mono",monospace'}}>{sale.items.reduce((a,i)=>a+i.qty,0)}</div></div>
+        {sale.discount>0&&<div style={{background:"linear-gradient(135deg,"+C.orange+"22,"+C.orange+"11)",border:"1px solid "+C.orange+"44",borderRadius:14,padding:14}}><div style={{fontSize:10,color:C.orange,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Discount</div><div style={{fontSize:22,fontWeight:900,color:C.orange,fontFamily:'"Space Mono",monospace'}}>{lkr(sale.discount)}</div></div>}
+        {sale.paymentMode==="cash"&&sale.change>0&&<div style={{background:"linear-gradient(135deg,"+C.gold+"22,"+C.gold+"11)",border:"1px solid "+C.gold+"44",borderRadius:14,padding:14}}><div style={{fontSize:10,color:C.gold,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Change</div><div style={{fontSize:22,fontWeight:900,color:C.gold,fontFamily:'"Space Mono",monospace'}}>{lkr(sale.change)}</div></div>}
+      </div>
+      <div style={{background:"#1a1a1a",borderRadius:14,padding:14,marginBottom:14,border:"1px solid #2a2a2a"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10,paddingBottom:10,borderBottom:"1px solid #2a2a2a"}}>
+          <div><div style={{fontSize:10,color:"#888",marginBottom:2}}>Invoice</div><div style={{fontWeight:700,color:C.red}}>{sale.invoiceNo}</div></div>
+          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#888",marginBottom:2}}>Customer</div><div style={{fontWeight:700}}>{sale.customer}</div></div>
+        </div>
+        {sale.items.map((item,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:6,marginBottom:6,borderBottom:"1px solid #242424"}}>
+          <div style={{flex:1}}><div style={{fontSize:12,fontWeight:600}}>{item.name}</div><div style={{fontSize:11,color:"#888"}}>{item.qty} × {lkr(item.price)}</div></div>
+          <div style={{fontWeight:700,fontFamily:'"Space Mono",monospace',color:C.green,fontSize:13}}>{lkr(item.price*item.qty)}</div>
+        </div>))}
+        <div style={{paddingTop:8,borderTop:"1px solid #2a2a2a"}}>
+          {sale.discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}><span style={{color:C.orange}}>Discount</span><span style={{color:C.orange}}>- {lkr(sale.discount)}</span></div>}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:17,fontWeight:900,color:C.red}}><span>TOTAL</span><span style={{fontFamily:'"Space Mono",monospace'}}>{lkr(sale.total)}</span></div>
+        </div>
+      </div>
+      <button onClick={onNewSale} style={{width:"100%",background:C.green,border:"none",borderRadius:12,padding:"15px",color:"#fff",fontSize:16,fontWeight:900,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+        <Ic n="plus" s={18} c="#fff"/>Start New Bill
+      </button>
+    </div>
+    <PrintSizePicker open={showPrintPicker} onClose={()=>setShowPrintPicker(false)} onSelect={sz=>{ printDoc(buildBillHTML(sz),sz); }}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PRODUCTS PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function ProductsPage() {
+  const {products,upsertProduct,deleteProduct,toast2}=useApp();
+  const [tab,setTab]=useState("mine");
+  const [srch,setSrch]=useState("");
+  const [catFlt,setCatFlt]=useState("All");
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [catSupFlt,setCatSupFlt]=useState("All");
+  const [catSrch,setCatSrch]=useState("");
+  const blank={name:"",sku:"",category:"Lighting",price:"",stock:"",unit:"pcs",taxRate:"0",minStock:"10",active:true,notes:""};
+  const [f,setF]=useState(blank);
+  const allCats=["All",...CATS];
+  const filtered=products.filter(p=>(catFlt==="All"||p.category===catFlt)&&(!srch||p.name.toLowerCase().includes(srch.toLowerCase())));
+  const catalogF=SUPPLIER_CATALOG.filter(i=>(catSupFlt==="All"||i.sup===catSupFlt)&&(!catSrch||i.name.toLowerCase().includes(catSrch.toLowerCase())));
+  const openForm=(p=null)=>{setEd(p);setF(p?{...blank,...p,price:String(p.price),stock:String(p.stock),taxRate:String(p.taxRate||0),minStock:String(p.minStock||10)}:blank);setShowForm(true);};
+  const save=async()=>{
+    if(!f.name.trim()||!f.price){toast2("Name and price required","error");return;}
+    setSaving(true);
+    try{await upsertProduct({...f,id:ed?ed.id:uid(),price:parseFloat(f.price),stock:parseFloat(f.stock)||0,taxRate:parseFloat(f.taxRate)||0,minStock:parseFloat(f.minStock)||10,createdAt:ed?ed.createdAt:today()});toast2(ed?"Updated!":"Product added!","success");setShowForm(false);}
+    catch(e){toast2("Failed: "+e.message,"error");}
+    setSaving(false);
+  };
+  const addFromCatalog=async(item)=>{
+    const sellPrice=Math.ceil(item.cost*1.25/10)*10;
+    await upsertProduct({id:uid(),name:item.name,sku:item.id,category:item.cat,price:sellPrice,stock:0,unit:item.unit||"pcs",taxRate:0,minStock:10,active:true,notes:"Supplier: "+item.sup,createdAt:today()});
+    toast2(item.name.slice(0,22)+" added to My Products","success");
+  };
+  return (<div style={{paddingBottom:90}}>
+    <div style={{padding:"14px 14px 0",background:"#1a1a1a",borderBottom:"1px solid #2a2a2a",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:0,paddingBottom:0}}>
+      <h2 style={{fontSize:16,fontWeight:900,padding:"14px 0 10px"}}>Products</h2>
+      <div style={{display:"flex",gap:8}}>
+        <ExportMenu onXLSX={()=>xlsxExp(products.map(p=>({Name:p.name,SKU:p.sku,Category:p.category,Price:p.price,Stock:p.stock,Unit:p.unit,Active:p.active})),"Products","products")} onPDF={()=>pdfExp("Products",["Name","Category","Price","Stock"].map(h=>({h,k:h.toLowerCase()})),products.map(p=>({name:p.name,category:p.category,price:lkr(p.price),stock:p.stock})),"products")}/>
+        <Btn ch={<><Ic n="plus" s={14} c="#fff"/>Add</>} onClick={()=>openForm()} sz="sm"/>
+      </div>
+    </div>
+    <Tabs tabs={[["mine","My Products ("+products.length+")"],["catalog","Supplier Catalog"]]} active={tab} setActive={setTab}/>
+    {tab==="mine"&&(<><div style={{padding:"9px 12px",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>
+        <div style={{position:"relative",marginBottom:7}}><div style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)"}}><Ic n="srch" s={13} c="#888"/></div><input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search products..." style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 10px 8px 30px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/></div>
+        <div style={{display:"flex",gap:5,overflow:"auto"}}>{allCats.map(c=><button key={c} onClick={()=>setCatFlt(c)} style={{background:catFlt===c?C.red:"#2a2a2a",border:"none",borderRadius:16,padding:"4px 11px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:catFlt===c?700:400,flexShrink:0}}>{c}</button>)}</div>
+      </div>
+      <div style={{padding:"10px 12px"}}>
+        {filtered.length===0?(<div style={{textAlign:"center",color:"#888",padding:40}}>
+          <Ic n="box" s={44} c="#888"/><p style={{marginTop:12,fontSize:13}}>No products yet</p>
+          <Btn ch="Add Product" onClick={()=>openForm()} col={C.red} st={{margin:"14px auto"}}/>
+          <p style={{fontSize:11,color:"#888"}}>Or browse Supplier Catalog tab</p>
+        </div>):filtered.map((p,i)=>(
+          <div key={p.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:12,marginBottom:8,border:"1px solid #2a2a2a",animationDelay:i*0.03+"s",opacity:p.active?1:0.5}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:44,height:44,borderRadius:10,background:C.red+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>💡</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:2}}>{p.name}</div>
+                <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,color:C.red,fontSize:13}}>{lkr(p.price)}</span>
+                  <Badge ch={p.category} col={C.muted}/>
+                  <span style={{fontSize:10,color:p.stock<=(p.minStock||10)?C.orange:"#888"}}>Stk: {p.stock} {p.unit}</span>
+                </div>
+              </div>
+              <button onClick={()=>openForm(p)} style={{background:"#2a2a2a",border:"none",borderRadius:8,padding:"7px 9px",cursor:"pointer"}}><Ic n="edit" s={15}/></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>)}
+    {tab==="catalog"&&(<><div style={{padding:"9px 12px",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>
+        <div style={{position:"relative",marginBottom:7}}><div style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)"}}><Ic n="srch" s={13} c="#888"/></div><input value={catSrch} onChange={e=>setCatSrch(e.target.value)} placeholder="Search catalog..." style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 10px 8px 30px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/></div>
+        <div style={{display:"flex",gap:5,overflow:"auto"}}>{SSUPS.map(s=><button key={s} onClick={()=>setCatSupFlt(s)} style={{background:catSupFlt===s?C.red:"#2a2a2a",border:"none",borderRadius:14,padding:"4px 10px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:catSupFlt===s?700:400,flexShrink:0}}>{s}</button>)}</div>
+      </div>
+      <div style={{padding:"5px 12px",fontSize:10,color:"#888",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>{catalogF.length} items — tap + to add to My Products</div>
+      <div style={{padding:"8px 10px"}}>
+        {catalogF.map((item,i)=>{
+          const sc=SUP_COL[item.sup]||"#888";
+          const cable=isCable(item);
+          return (<div key={item.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid #2a2a2a",display:"flex",alignItems:"center",gap:10,animationDelay:Math.min(i,20)*0.02+"s"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:700,lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{background:sc+"22",color:sc,border:"1px solid "+sc+"44",borderRadius:3,padding:"1px 6px",fontSize:9,fontWeight:700}}>{item.sup}</span>
+                {cable&&<span style={{background:C.gold+"22",color:C.gold,border:"1px solid "+C.gold+"44",borderRadius:3,padding:"1px 5px",fontSize:9,fontWeight:700}}>📏 Cable</span>}
+                <span style={{fontSize:10,color:"#888"}}>Cost: {lkr(item.cost)}</span>
+                <span style={{fontSize:10,color:C.green,fontWeight:700}}>Sell: {lkr(Math.ceil(item.cost*1.25/10)*10)}</span>
+              </div>
+            </div>
+            <button onClick={()=>addFromCatalog(item)} style={{background:C.green+"22",border:"1px solid "+C.green+"44",borderRadius:8,width:34,height:34,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:C.green,fontSize:18,flexShrink:0}}>+</button>
+          </div>);
+        })}
+      </div>
+    </>)}
+    <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?"Edit Product":"Add Product"} ch={<>
+      <Inp lbl="Product Name" val={f.name} set={v=>setF(p=>({...p,name:v}))} req/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Inp lbl="Price (Rs.)" val={f.price} set={v=>setF(p=>({...p,price:v}))} type="number" req/>
+        <Inp lbl="Stock" val={f.stock} set={v=>setF(p=>({...p,stock:v}))} type="number"/>
+      </div>
+      <Sel lbl="Category" val={f.category} set={v=>setF(p=>({...p,category:v}))} opts={CATS}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Sel lbl="Unit" val={f.unit} set={v=>setF(p=>({...p,unit:v}))} opts={["pcs","m","roll","kg","box","set","pair"]}/>
+        <Inp lbl="Min Stock Alert" val={f.minStock} set={v=>setF(p=>({...p,minStock:v}))} type="number"/>
+      </div>
+      <Inp lbl="SKU / Code" val={f.sku} set={v=>setF(p=>({...p,sku:v}))} ph="Optional"/>
+      <Inp lbl="Tax Rate %" val={f.taxRate} set={v=>setF(p=>({...p,taxRate:v}))} type="number"/>
+      <Textarea lbl="Notes" val={f.notes} set={v=>setF(p=>({...p,notes:v}))}/>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        {ed&&<Btn ch={<><Ic n="del" s={13} c="#fff"/>{f.active?"Deactivate":"Activate"}</>} col="#333" onClick={()=>setF(p=>({...p,active:!p.active}))}/>}
+        <Btn ch={saving?"Saving...":"Save Product"} onClick={save} dis={saving} full/>
+        {ed&&<Btn ch={<><Ic n="del" s={13} c="#fff"/>Delete</>} col="#3a1a1a" onClick={async()=>{if(confirm("Delete this product?"))await deleteProduct(ed.id);setShowForm(false);}}/>}
+      </div>
+    </>}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  COMPANIES PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function CompaniesPage() {
+  const {companies,upsertCompany,deleteCompany,toast2}=useApp();
+  const [srch,setSrch]=useState("");
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const blank={name:"",type:"Supplier",contactPerson:"",phone:"",email:"",address:"",paymentTerms:"30 days",notes:"",active:true};
+  const [f,setF]=useState(blank);
+  const filtered=companies.filter(c=>!srch||c.name.toLowerCase().includes(srch.toLowerCase()));
+  const openForm=(c=null)=>{setEd(c);setF(c?{...blank,...c}:blank);setShowForm(true);};
+  const save=async()=>{
+    if(!f.name.trim()){toast2("Company name required","error");return;}
+    setSaving(true);
+    try{await upsertCompany({...f,id:ed?ed.id:uid(),createdAt:ed?ed.createdAt:today()});toast2(ed?"Updated!":"Company added!","success");setShowForm(false);}
+    catch(e){toast2("Failed: "+e.message,"error");}
+    setSaving(false);
+  };
+  const typeColors={"Supplier":C.blue,"Manufacturer":C.green,"Distributor":C.orange,"Customer":C.purple,"Other":C.muted};
+  return (<div style={{paddingBottom:90}}>
+    <div style={{padding:"14px",background:"#1a1a1a",borderBottom:"1px solid #2a2a2a"}}>
+      <SectionHeader title="Companies & Suppliers" right={<>
+        <ExportMenu onXLSX={()=>xlsxExp(companies.map(c=>({Name:c.name,Type:c.type,Contact:c.contactPerson,Phone:c.phone,Email:c.email,Address:c.address})),"Companies","companies")} onPDF={()=>pdfExp("Companies & Suppliers",["Name","Type","Phone"].map(h=>({h,k:h.toLowerCase()})),companies.map(c=>({name:c.name,type:c.type,phone:c.phone})),"companies")}/>
+        <Btn ch={<><Ic n="plus" s={14} c="#fff"/>Add</>} onClick={()=>openForm()} sz="sm"/>
+      </>}/>
+      <div style={{position:"relative"}}><div style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)"}}><Ic n="srch" s={13} c="#888"/></div><input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search companies..." style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"8px 10px 8px 30px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/></div>
+    </div>
+    <div style={{padding:"10px 12px"}}>
+      {filtered.length===0?(<div style={{textAlign:"center",color:"#888",padding:40}}><Ic n="bldg" s={44} c="#888"/><p style={{marginTop:12,fontSize:13}}>No companies yet</p><Btn ch="Add Company" onClick={()=>openForm()} col={C.red} st={{margin:"14px auto"}}/></div>)
+      :filtered.map((c,i)=>{
+        const tc=typeColors[c.type]||C.muted;
+        return (<div key={c.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:13,marginBottom:8,border:"1px solid #2a2a2a",animationDelay:i*0.04+"s"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:44,height:44,borderRadius:12,background:tc+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🏢</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:3}}>{c.name}</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Badge ch={c.type} col={tc}/>{c.contactPerson&&<span style={{fontSize:11,color:"#888"}}>👤 {c.contactPerson}</span>}{c.phone&&<span style={{fontSize:11,color:"#888"}}>📞 {c.phone}</span>}</div>
+            </div>
+            <button onClick={()=>openForm(c)} style={{background:"#2a2a2a",border:"none",borderRadius:8,padding:"7px 9px",cursor:"pointer"}}><Ic n="edit" s={15}/></button>
+          </div>
+        </div>);
+      })}
+    </div>
+    <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?"Edit Company":"Add Company"} ch={<>
+      <Inp lbl="Company Name" val={f.name} set={v=>setF(p=>({...p,name:v}))} req/>
+      <Sel lbl="Type" val={f.type} set={v=>setF(p=>({...p,type:v}))} opts={["Supplier","Manufacturer","Distributor","Customer","Other"]}/>
+      <Inp lbl="Contact Person" val={f.contactPerson} set={v=>setF(p=>({...p,contactPerson:v}))}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Inp lbl="Phone" val={f.phone} set={v=>setF(p=>({...p,phone:v}))} type="tel"/>
+        <Inp lbl="Email" val={f.email} set={v=>setF(p=>({...p,email:v}))} type="email"/>
+      </div>
+      <Inp lbl="Address" val={f.address} set={v=>setF(p=>({...p,address:v}))}/>
+      <Inp lbl="Payment Terms" val={f.paymentTerms} set={v=>setF(p=>({...p,paymentTerms:v}))} ph="30 days"/>
+      <Textarea lbl="Notes" val={f.notes} set={v=>setF(p=>({...p,notes:v}))}/>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <Btn ch={saving?"Saving...":"Save"} onClick={save} dis={saving} full/>
+        {ed&&<Btn ch="Delete" col="#3a1a1a" onClick={async()=>{if(confirm("Delete?"))await deleteCompany(ed.id);setShowForm(false);}}/>}
+      </div>
+    </>}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CHEQUES PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function ChequesPage() {
+  const {cheques,upsertCheque,deleteCheque,toast2}=useApp();
+  const [flt,setFlt]=useState("All");
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const blank={party:"",amount:"",bank:"",chqNo:"",issueDate:today(),dueDate:"",type:"Received",status:"pending",notes:""};
+  const [f,setF]=useState(blank);
+  const filtered=cheques.filter(c=>flt==="All"||c.status===flt.toLowerCase()||c.type===flt);
+  const total=filtered.reduce((a,c)=>a+parseFloat(c.amount||0),0);
+  const openForm=(c=null)=>{setEd(c);setF(c?{...blank,...c,amount:String(c.amount)}:blank);setShowForm(true);};
+  const save=async()=>{
+    if(!f.party.trim()||!f.amount||!f.chqNo){toast2("Fill required fields","error");return;}
+    setSaving(true);
+    try{await upsertCheque({...f,id:ed?ed.id:uid(),amount:parseFloat(f.amount),createdAt:ed?ed.createdAt:today()});toast2("Saved!","success");setShowForm(false);}
+    catch(e){toast2("Failed: "+e.message,"error");}
+    setSaving(false);
+  };
+  const markCleared=async(c)=>{await upsertCheque({...c,status:"cleared"});toast2("Cheque marked cleared!","success");};
+  const stCol={pending:C.orange,cleared:C.green,bounced:C.red};
+  return (<div style={{paddingBottom:90}}>
+    <div style={{padding:"14px",background:"#1a1a1a",borderBottom:"1px solid #2a2a2a"}}>
+      <SectionHeader title="Cheques" right={<>
+        <ExportMenu onXLSX={()=>xlsxExp(cheques.map(c=>({Party:c.party,Amount:c.amount,Bank:c.bank,ChequeNo:c.chqNo,Type:c.type,Status:c.status,Due:c.dueDate})),"Cheques","cheques")} onPDF={()=>pdfExp("Cheques",["Party","Amount","Bank","Status"].map(h=>({h,k:h.toLowerCase()})),cheques.map(c=>({party:c.party,amount:lkr(c.amount),bank:c.bank,status:c.status})),"cheques")}/>
+        <Btn ch={<><Ic n="plus" s={14} c="#fff"/>Add</>} onClick={()=>openForm()} sz="sm"/>
+      </>}/>
+      <div style={{display:"flex",gap:5,overflow:"auto"}}>
+        {["All","Received","Issued","pending","cleared","bounced"].map(s=><button key={s} onClick={()=>setFlt(s)} style={{background:flt===s?C.red:"#2a2a2a",border:"none",borderRadius:14,padding:"4px 10px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:flt===s?700:400,flexShrink:0,textTransform:"capitalize"}}>{s}</button>)}
+      </div>
+    </div>
+    <div style={{padding:"8px 14px 4px",background:"#141414",borderBottom:"1px solid #2a2a2a",display:"flex",gap:10,justifyContent:"space-between"}}>
+      <span style={{fontSize:12,color:"#888"}}>{filtered.length} cheques</span>
+      <span style={{fontFamily:'"Space Mono",monospace',fontWeight:700,color:C.gold,fontSize:13}}>Total: {lkr(total)}</span>
+    </div>
+    <div style={{padding:"10px 12px"}}>
+      {filtered.length===0?(<div style={{textAlign:"center",color:"#888",padding:40}}><Ic n="chq" s={44} c="#888"/><p style={{marginTop:12,fontSize:13}}>No cheques {flt!=="All"?"with filter "+flt:""}</p></div>)
+      :filtered.map((c,i)=>{
+        const sc=stCol[c.status]||C.muted;
+        return (<div key={c.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:13,marginBottom:8,border:"1px solid #2a2a2a",borderLeft:"3px solid "+sc,animationDelay:i*0.04+"s"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:3}}>{c.party}</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Badge ch={c.type} col={c.type==="Received"?C.green:C.orange}/><Badge ch={c.status.toUpperCase()} col={sc}/></div>
+            </div>
+            <div style={{fontFamily:'"Space Mono",monospace',fontWeight:900,fontSize:16,color:sc}}>{lkr(c.amount)}</div>
+          </div>
+          <div style={{fontSize:11,color:"#888",marginBottom:8}}>Cheque No: {c.chqNo} · Bank: {c.bank}{c.dueDate?" · Due: "+c.dueDate:""}</div>
+          {c.saleInvoice&&<div style={{fontSize:11,color:C.blue,marginBottom:6}}>🧾 Invoice: {c.saleInvoice}</div>}
+          <div style={{display:"flex",gap:7}}>
+            <button onClick={()=>openForm(c)} style={{background:"#2a2a2a",border:"none",borderRadius:7,padding:"6px 10px",cursor:"pointer",color:"#fff",fontSize:11,display:"flex",alignItems:"center",gap:5}}><Ic n="edit" s={12}/>Edit</button>
+            {c.status==="pending"&&<button onClick={()=>markCleared(c)} style={{background:C.green+"22",border:"1px solid "+C.green+"44",borderRadius:7,padding:"6px 10px",cursor:"pointer",color:C.green,fontSize:11,fontWeight:700}}>Mark Cleared</button>}
+          </div>
+        </div>);
+      })}
+    </div>
+    <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?"Edit Cheque":"Add Cheque"} ch={<>
+      <Inp lbl="Party Name" val={f.party} set={v=>setF(p=>({...p,party:v}))} req/>
+      <Inp lbl="Amount (Rs.)" val={f.amount} set={v=>setF(p=>({...p,amount:v}))} type="number" req/>
+      <Sel lbl="Bank" val={f.bank} set={v=>setF(p=>({...p,bank:v}))} opts={["","","Bank of Ceylon","HNB","Commercial Bank","Sampath Bank","Peoples Bank","NDB","DFCC","Seylan Bank","Pan Asia Bank","Nations Trust Bank","Union Bank","Citi Bank","Other"]}/>
+      <Inp lbl="Cheque No." val={f.chqNo} set={v=>setF(p=>({...p,chqNo:v}))} req/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Sel lbl="Type" val={f.type} set={v=>setF(p=>({...p,type:v}))} opts={["Received","Issued"]}/>
+        <Sel lbl="Status" val={f.status} set={v=>setF(p=>({...p,status:v}))} opts={["pending","cleared","bounced"]}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Inp lbl="Issue Date" val={f.issueDate} set={v=>setF(p=>({...p,issueDate:v}))} type="date"/>
+        <Inp lbl="Due Date" val={f.dueDate} set={v=>setF(p=>({...p,dueDate:v}))} type="date"/>
+      </div>
+      <Textarea lbl="Notes" val={f.notes} set={v=>setF(p=>({...p,notes:v}))}/>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <Btn ch={saving?"Saving...":"Save"} onClick={save} dis={saving} full/>
+        {ed&&<Btn ch="Delete" col="#3a1a1a" onClick={async()=>{if(confirm("Delete?"))await deleteCheque(ed.id);setShowForm(false);}}/>}
+      </div>
+    </>}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  EXPENSES PAGE (NEW)
+// ═══════════════════════════════════════════════════════════════════════
+function ExpensesPage() {
+  const {expenses,upsertExpense,deleteExpense,users,user,toast2}=useApp();
+  const [flt,setFlt]=useState("All");
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const blank={title:"",amount:"",category:"Other",date:today(),paidBy:user.name,reason:"",notes:""};
+  const [f,setF]=useState(blank);
+  const month=today().slice(0,7);
+  const filtered=(expenses||[]).filter(e=>flt==="All"||e.category===flt);
+  const monthTotal=(expenses||[]).filter(e=>e.date&&e.date.startsWith(month)).reduce((a,e)=>a+parseFloat(e.amount||0),0);
+  const openForm=(e=null)=>{setEd(e);setF(e?{...blank,...e,amount:String(e.amount)}:blank);setShowForm(true);};
+  const save=async()=>{
+    if(!f.title.trim()||!f.amount){toast2("Title and amount required","error");return;}
+    setSaving(true);
+    try{await upsertExpense({...f,id:ed?ed.id:uid(),amount:parseFloat(f.amount),createdAt:ed?ed.createdAt:today()});toast2("Expense saved!","success");setShowForm(false);}
+    catch(e){toast2("Failed: "+e.message,"error");}
+    setSaving(false);
+  };
+  const catCols={"Stock Purchase":C.blue,"Electricity":C.gold,"Rent":C.purple,"Salaries":C.green,"Transport":C.orange,"Maintenance":C.red,"Office Supplies":C.muted,"Other":C.muted};
+  return (<div style={{paddingBottom:90}}>
+    <div style={{padding:"14px",background:"#1a1a1a",borderBottom:"1px solid #2a2a2a"}}>
+      <SectionHeader title="Expenses" right={<>
+        <ExportMenu onXLSX={()=>xlsxExp((expenses||[]).map(e=>({Title:e.title,Amount:e.amount,Category:e.category,Date:e.date,PaidBy:e.paidBy,Reason:e.reason})),"Expenses","expenses")} onPDF={()=>pdfExp("Expenses",["Title","Amount","Category","Date","Paid By"].map(h=>({h,k:h.toLowerCase().replace(" ","")})),  (expenses||[]).map(e=>({title:e.title,amount:lkr(e.amount),category:e.category,date:e.date,paidby:e.paidBy})),"expenses")}/>
+        <Btn ch={<><Ic n="plus" s={14} c="#fff"/>Add</>} onClick={()=>openForm()} sz="sm"/>
+      </>}/>
+      <div style={{background:"linear-gradient(135deg,"+C.red+"22,"+C.red+"11)",border:"1px solid "+C.red+"33",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><div style={{fontSize:10,color:"#888",textTransform:"uppercase",letterSpacing:0.5}}>This Month</div><div style={{fontSize:20,fontWeight:900,color:C.red,fontFamily:'"Space Mono",monospace'}}>{lkr(monthTotal)}</div></div>
+        <Ic n="exp" s={32} c={C.red+"66"}/>
+      </div>
+      <div style={{display:"flex",gap:5,overflow:"auto"}}>
+        {["All",...EXP_CATS].map(c=><button key={c} onClick={()=>setFlt(c)} style={{background:flt===c?C.red:"#2a2a2a",border:"none",borderRadius:14,padding:"4px 10px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:flt===c?700:400,flexShrink:0}}>{c}</button>)}
+      </div>
+    </div>
+    <div style={{padding:"10px 12px"}}>
+      {filtered.length===0?(<div style={{textAlign:"center",color:"#888",padding:40}}><Ic n="exp" s={44} c="#888"/><p style={{marginTop:12,fontSize:13}}>No expenses recorded</p><Btn ch="Add Expense" onClick={()=>openForm()} col={C.red} st={{margin:"14px auto"}}/></div>)
+      :[...filtered].reverse().map((e,i)=>{
+        const cc=catCols[e.category]||C.muted;
+        return (<div key={e.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:13,marginBottom:8,border:"1px solid #2a2a2a",borderLeft:"3px solid "+cc,animationDelay:i*0.04+"s"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:3}}>{e.title}</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                <Badge ch={e.category} col={cc}/>
+                <span style={{fontSize:11,color:"#888"}}>👤 {e.paidBy}</span>
+                <span style={{fontSize:11,color:"#888"}}>📅 {e.date}</span>
+              </div>
+            </div>
+            <div style={{fontFamily:'"Space Mono",monospace',fontWeight:900,fontSize:16,color:C.red}}>{lkr(e.amount)}</div>
+          </div>
+          {e.reason&&<div style={{fontSize:12,color:"#aaa",marginBottom:6,fontStyle:"italic"}}>"{e.reason}"</div>}
+          <button onClick={()=>openForm(e)} style={{background:"#2a2a2a",border:"none",borderRadius:7,padding:"6px 10px",cursor:"pointer",color:"#fff",fontSize:11,display:"flex",alignItems:"center",gap:5}}><Ic n="edit" s={12}/>Edit</button>
+        </div>);
+      })}
+    </div>
+    <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?"Edit Expense":"Add Expense"} ch={<>
+      <Inp lbl="Title *" val={f.title} set={v=>setF(p=>({...p,title:v}))} ph="e.g. Electricity Bill" req/>
+      <Inp lbl="Amount (Rs.) *" val={f.amount} set={v=>setF(p=>({...p,amount:v}))} type="number" req/>
+      <Sel lbl="Category" val={f.category} set={v=>setF(p=>({...p,category:v}))} opts={EXP_CATS}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Inp lbl="Date" val={f.date} set={v=>setF(p=>({...p,date:v}))} type="date"/>
+        <Inp lbl="Paid By" val={f.paidBy} set={v=>setF(p=>({...p,paidBy:v}))} ph="Your name"/>
+      </div>
+      <Inp lbl="Reason / Description" val={f.reason} set={v=>setF(p=>({...p,reason:v}))} ph="What was this for?"/>
+      <Textarea lbl="Notes" val={f.notes} set={v=>setF(p=>({...p,notes:v}))}/>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <Btn ch={saving?"Saving...":"Save Expense"} onClick={save} dis={saving} full/>
+        {ed&&<Btn ch="Delete" col="#3a1a1a" onClick={async()=>{if(confirm("Delete?"))await deleteExpense(ed.id);setShowForm(false);}}/>}
+      </div>
+    </>}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ACCOUNTS PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function AccountsPage() {
+  const {users,upsertUser,toast2,user,reconfigure}=useApp();
+  const [showForm,setShowForm]=useState(false);
+  const [ed,setEd]=useState(null);
+  const blank={name:"",username:"",password:"",role:"cashier",email:"",active:true};
+  const [f,setF]=useState(blank);
+  const [saving,setSaving]=useState(false);
+  const roleCol={admin:C.red,manager:C.blue,cashier:C.green};
+  const openForm=(u=null)=>{if(u){setEd(u);setF({...blank,...u});}else{setEd(null);setF(blank);}setShowForm(true);};
+  const save=async()=>{
+    if(!f.name.trim()||!f.username.trim()||!f.password){toast2("Fill all required fields!","error");return;}
+    if(!ed&&users.find(u=>u.username===f.username)){toast2("Username already exists!","error");return;}
+    setSaving(true);
+    try{await upsertUser({...f,id:ed?ed.id:uid(),avatar:f.name[0].toUpperCase(),createdAt:ed?ed.createdAt:today()});toast2(ed?"Updated!":"User added!","success");setShowForm(false);}
+    catch(e){toast2("Failed: "+e.message,"error");}
+    setSaving(false);
+  };
+  return (<div style={{paddingBottom:90}}>
+    <div style={{padding:"14px"}}>
+      <SectionHeader title="User Accounts" right={<Btn ch={<><Ic n="plus" s={14} c="#fff"/>Add User</>} onClick={()=>openForm()} sz="sm"/>}/>
+      {users.map((u,i)=>(<div key={u.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:13,marginBottom:8,border:"1px solid #2a2a2a",animationDelay:i*0.04+"s",opacity:u.active?1:0.5}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:42,height:42,borderRadius:12,background:(roleCol[u.role]||C.muted)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:900,color:roleCol[u.role]||C.muted,flexShrink:0}}>{u.avatar||u.name[0]}</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:700}}>{u.name}</div>
+            <div style={{display:"flex",gap:6,marginTop:3}}><Badge ch={u.role.toUpperCase()} col={roleCol[u.role]||C.muted}/><span style={{fontSize:11,color:"#888"}}>@{u.username}</span></div>
+          </div>
+          <button onClick={()=>openForm(u)} style={{background:"#2a2a2a",border:"none",borderRadius:8,padding:"7px 9px",cursor:"pointer"}}><Ic n="edit" s={14}/></button>
+        </div>
+      </div>))}
+      <div style={{background:"#1a0a0a",borderRadius:12,padding:14,border:"1px solid "+C.red+"44",marginTop:16}}>
+        <p style={{fontSize:13,fontWeight:700,marginBottom:10,color:C.red}}>Database Settings</p>
+        <Btn ch="Reconfigure Database Connection" col="#252525" onClick={()=>{if(confirm("Disconnect from database?"))reconfigure();}} full/>
+      </div>
+    </div>
+    <Modal open={showForm} onClose={()=>setShowForm(false)} title={ed?"Edit User":"Add User"} ch={<>
+      <Inp lbl="Full Name" val={f.name} set={v=>setF(p=>({...p,name:v}))} req/>
+      <Inp lbl="Username" val={f.username} set={v=>setF(p=>({...p,username:v}))} req/>
+      <Inp lbl="Password" val={f.password} set={v=>setF(p=>({...p,password:v}))} type="password" req/>
+      <Sel lbl="Role" val={f.role} set={v=>setF(p=>({...p,role:v}))} opts={["admin","manager","cashier"].map(r=>({v:r,l:r.charAt(0).toUpperCase()+r.slice(1)}))}/>
+      <Inp lbl="Email" val={f.email||""} set={v=>setF(p=>({...p,email:v}))} type="email"/>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        {ed&&<Btn ch={f.active?"Deactivate":"Activate"} col="#333" onClick={()=>setF(p=>({...p,active:!p.active}))}/>}
+        <Btn ch={saving?"Saving...":"Save User"} onClick={save} dis={saving} full/>
+      </div>
+    </>}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  QUOTATION PAGE
+// ═══════════════════════════════════════════════════════════════════════
+function QuotationPage() {
+  const {toast2}=useApp();
+  const [qTab,setQTab]=useState("catalog");
+  const [items,setItems]=useState([]);
+  const [custSrch,setCustSrch]=useState("");
+  const [catFlt,setCatFlt]=useState("All");
+  const [markup,setMarkup]=useState(25);
+  const [cableModal,setCableModal]=useState(null);
+  const [cableM,setCableM]=useState("");
+  const [showPrintPicker,setShowPrintPicker]=useState(false);
+  const [showCustom,setShowCustom]=useState(false);
+  const [custItem,setCustItem]=useState({name:"",price:"",qty:"1",unit:"pcs",notes:""});
+  const [customer,setCustomer]=useState({name:"",address:"",phone:"",email:"",company:""});
+  const qno=useState(()=>"QT-"+today().replace(/-/g,"").slice(2)+"-"+String(Math.floor(Math.random()*900)+100))[0];
+  const total=items.reduce((a,i)=>a+i.price*i.qty,0);
+  const catalogF=SUPPLIER_CATALOG.filter(i=>(catFlt==="All"||i.sup===catFlt)&&(!custSrch||i.name.toLowerCase().includes(custSrch.toLowerCase())));
+  const sellPrice=item=>Math.ceil(item.cost*(1+markup/100)/10)*10;
+  const addItem=item=>{
+    if(isCable(item)){setCableModal({item});setCableM("");return;}
+    setItems(prev=>{
+      const ex=prev.find(x=>x.id===item.id);
+      if(ex)return prev.map(x=>x.id===item.id?{...x,qty:x.qty+1}:x);
+      return[...prev,{id:item.id,name:item.name,price:sellPrice(item),qty:1,unit:item.unit||"pcs",sup:item.sup,cost:item.cost}];
+    });
+  };
+  const confirmCable=()=>{
+    const m=parseFloat(cableM);
+    if(!m||m<=0){toast2("Enter valid meters","error");return;}
+    const {item}=cableModal;
+    const sellPerM=Math.ceil(item.cost/100*(1+markup/100)*10)/10;
+    const pid=item.id+"_"+m+"m";
+    setItems(prev=>{
+      const ex=prev.find(x=>x.id===pid);
+      if(ex)return prev.map(x=>x.id===pid?{...x,qty:x.qty+1}:x);
+      return[...prev,{id:pid,name:item.name+" ("+m+"m)",price:Math.ceil(sellPerM*m/10)*10,qty:1,unit:"m",sup:item.sup,meters:m}];
+    });
+    toast2(item.name.slice(0,20)+" "+m+"m added","success");
+    setCableModal(null);
+  };
+  const addCustom=()=>{
+    if(!custItem.name.trim()||!custItem.price){toast2("Name and price required","error");return;}
+    setItems(prev=>[...prev,{id:"custom_"+uid(),name:custItem.name.trim(),price:parseFloat(custItem.price),qty:parseInt(custItem.qty)||1,unit:custItem.unit||"pcs",sup:"Custom",notes:custItem.notes,isCustom:true}]);
+    toast2(custItem.name.slice(0,22)+" added","success");
+    setCustItem({name:"",price:"",qty:"1",unit:"pcs",notes:""});
+    setShowCustom(false);
+  };
+  const updQty=(id,d)=>setItems(prev=>prev.map(i=>i.id===id?{...i,qty:Math.max(1,i.qty+d)}:i));
+  const remItem=id=>setItems(prev=>prev.filter(i=>i.id!==id));
+
+  const buildQuoteHTML=(size)=>{
+    const isT=size==="thermal80"||size==="thermal58";
+    const rows=items.map(i=>"<tr style='border-bottom:1px solid #eee'><td style='padding:5px 4px;font-size:"+(isT?"9":"11")+"px'>"+i.name+(i.isCustom?" *":"")+"</td><td style='text-align:center;padding:5px 4px;font-size:"+(isT?"9":"11")+"px'>"+i.qty+"</td><td style='text-align:right;padding:5px 4px;font-size:"+(isT?"9":"11")+"px'>Rs."+Number(i.price).toFixed(2)+"</td><td style='text-align:right;padding:5px 4px;font-size:"+(isT?"9":"11")+"px;font-weight:700'>Rs."+Number(i.price*i.qty).toFixed(2)+"</td></tr>").join("");
+    const header=isT
+      ? "<div style='text-align:center;border-bottom:2px solid #CC0000;padding-bottom:10px;margin-bottom:10px'><div style='font-size:16px;font-weight:900;letter-spacing:2px;color:#CC0000'>NIPPON ELECTRICALS</div><div style='font-size:10px;margin-top:2px'>QUOTATION</div><div style='font-size:9px;color:#555;margin-top:3px'>"+qno+" · "+today()+"</div></div>"
+      : "<div style='background:linear-gradient(135deg,#CC0000,#7A0000);color:#fff;padding:22px;margin-bottom:0'><div style='display:flex;align-items:center;gap:14px;margin-bottom:14px'><div style='width:52px;height:52px;background:rgba(255,255,255,0.15);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px'>💡</div><div><div style='font-size:22px;font-weight:900;letter-spacing:1px'>NIPPON ELECTRICALS</div><div style='font-size:12px;opacity:0.85'>Quotation / Estimate</div></div></div><div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px'><div><span style='opacity:0.7'>Quotation No</span><br/><strong style='font-size:14px'>"+qno+"</strong></div><div><span style='opacity:0.7'>Date</span><br/><strong style='font-size:14px'>"+today()+"</strong></div>"+(customer.name?"<div><span style='opacity:0.7'>To</span><br/><strong>"+customer.name+"</strong>"+(customer.company?"<br/><span style='font-size:10px;opacity:0.8'>"+customer.company+"</span>":"")+"</div><div>"+(customer.phone?"<span style='opacity:0.7'>Phone</span><br/><strong>"+customer.phone+"</strong>":"")+"</div>":"")+"</div></div>";
+    const tbl="<table style='width:100%;border-collapse:collapse;margin:18px 0 10px'><thead><tr style='background:#CC0000;color:#fff'><th style='padding:"+(isT?"4px 3px":"9px 12px")+";text-align:left;font-size:"+(isT?"9":"11")+"px'>Item</th><th style='padding:"+(isT?"4px 3px":"9px 12px")+";text-align:center;font-size:"+(isT?"9":"11")+"px'>Qty</th><th style='padding:"+(isT?"4px 3px":"9px 12px")+";text-align:right;font-size:"+(isT?"9":"11")+"px'>Unit Price</th><th style='padding:"+(isT?"4px 3px":"9px 12px")+";text-align:right;font-size:"+(isT?"9":"11")+"px'>Amount</th></tr></thead><tbody>"+rows+"</tbody></table>";
+    const totRow="<div style='border-top:2px solid #CC0000;padding-top:10px;text-align:right'><div style='font-size:"+(isT?"13":"18")+"px;font-weight:900;color:#CC0000'>TOTAL: Rs."+Number(total).toFixed(2)+"</div><div style='font-size:"+(isT?"9":"11")+"px;color:#888;margin-top:4px'>All prices in LKR · Inclusive of markup</div></div>";
+    const footer=isT?"<div style='text-align:center;margin-top:10px;font-size:9px;color:#888;border-top:1px dashed #ccc;padding-top:8px'>Valid for 7 days · Nippon Electricals Sri Lanka</div>":"<div style='margin-top:22px;padding:14px 18px;background:#fff5f5;border-radius:10px;border-left:4px solid #CC0000'><p style='font-size:12px;color:#CC0000;font-weight:700;margin-bottom:6px'>Terms & Conditions</p><p style='font-size:11px;color:#555;line-height:1.7'>• This quotation is valid for 7 days<br/>• Prices subject to change without notice<br/>• All prices in Sri Lankan Rupees (LKR)<br/>* Custom items are subject to availability</p></div>";
+    return header+tbl+totRow+footer;
+  };
+
+  return (<div style={{height:"100vh",display:"flex",flexDirection:"column",paddingBottom:70}}>
+    <div style={{background:"linear-gradient(135deg,"+C.red+" 0%,#7A0000 100%)",padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+      <NipponLogo size={34}/>
+      <div style={{flex:1}}><div style={{fontWeight:900,fontSize:15,color:"#fff"}}>Quotation Builder</div><div style={{fontSize:10,color:"#ffcccc"}}>{qno}</div></div>
+      <div style={{display:"flex",gap:7,alignItems:"center"}}>
+        <button onClick={()=>setShowCustom(true)} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.25)",borderRadius:8,padding:"7px 10px",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:5}}>
+          <Ic n="plus" s={13} c="#fff"/>Custom
+        </button>
+        {items.length>0&&<button onClick={()=>setShowPrintPicker(true)} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,padding:"7px 12px",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
+          <Ic n="print" s={14} c="#fff"/>Print
+        </button>}
+      </div>
+    </div>
+    <Tabs tabs={[["catalog","Catalog"],["items","Items"+(items.length>0?" ("+items.length+")":"")],["customer","Customer"]]} active={qTab} setActive={setQTab}/>
+
+    {/* CATALOG TAB */}
+    {qTab==="catalog"&&(<div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"8px 12px",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>
+        <div style={{display:"flex",gap:8,marginBottom:7,alignItems:"center"}}>
+          <div style={{position:"relative",flex:1}}><div style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)"}}><Ic n="srch" s={13} c="#888"/></div><input value={custSrch} onChange={e=>setCustSrch(e.target.value)} placeholder="Search products..." style={{width:"100%",background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"7px 10px 7px 30px",color:"#f0f0f0",fontSize:13,outline:"none",fontFamily:"inherit"}}/></div>
+          <div style={{display:"flex",alignItems:"center",gap:5,background:"#242424",border:"1px solid #2a2a2a",borderRadius:8,padding:"5px 10px",flexShrink:0}}>
+            <span style={{fontSize:10,color:"#888"}}>Markup</span>
+            <input type="number" value={markup} onChange={e=>setMarkup(parseFloat(e.target.value)||0)} style={{width:40,background:"none",border:"none",color:C.gold,fontWeight:700,fontSize:12,outline:"none",textAlign:"center"}}/>
+            <span style={{fontSize:10,color:"#888"}}>%</span>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:5,overflow:"auto"}}>{SSUPS.map(s=><button key={s} onClick={()=>setCatFlt(s)} style={{background:catFlt===s?C.red:"#2a2a2a",border:"none",borderRadius:14,padding:"4px 10px",color:"#fff",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",fontWeight:catFlt===s?700:400,flexShrink:0}}>{s}</button>)}</div>
+      </div>
+      <div style={{padding:"4px 12px",fontSize:10,color:"#888",background:"#0f0f0f",borderBottom:"1px solid #2a2a2a"}}>{catalogF.length} items · {markup}% markup · tap + to add · tap Custom to add unlisted item</div>
+      <div style={{flex:1,overflow:"auto",padding:"8px 10px"}}>
+        {catalogF.map((item,i)=>{
+          const inQ=items.find(x=>x.id===item.id||x.id.startsWith(item.id+"_"));
+          const sc=SUP_COL[item.sup]||"#888";
+          const cable=isCable(item);
+          return (<div key={item.id} className="fadeUp" style={{background:inQ?"#1a1000":"#1a1a1a",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid "+(inQ?C.gold+"88":"#2a2a2a"),display:"flex",alignItems:"center",gap:10,animationDelay:Math.min(i,20)*0.02+"s"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:700,lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{background:sc+"22",color:sc,border:"1px solid "+sc+"44",borderRadius:3,padding:"1px 6px",fontSize:9,fontWeight:700}}>{item.sup}</span>
+                {cable&&<span style={{background:C.gold+"22",color:C.gold,border:"1px solid "+C.gold+"44",borderRadius:3,padding:"1px 5px",fontSize:9}}>📏 Cable</span>}
+                <span style={{fontSize:10,color:"#888"}}>Cost: {lkr(item.cost)}</span>
+                <span style={{fontSize:10,color:C.green,fontWeight:700}}>Sell: {lkr(sellPrice(item))}/{cable?"m":item.unit}</span>
+              </div>
+            </div>
+            <button onClick={()=>addItem(item)} style={{background:inQ?C.gold:C.red,border:"none",borderRadius:8,width:34,height:34,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:inQ?"#000":"#fff",fontSize:cable?12:16,flexShrink:0}}>{cable?"📏":(inQ?items.filter(x=>x.id===item.id||x.id.startsWith(item.id+"_")).reduce((a,x)=>a+x.qty,0):"+")} </button>
+          </div>);
+        })}
+      </div>
+    </div>)}
+
+    {/* ITEMS TAB */}
+    {qTab==="items"&&(<div style={{flex:1,overflow:"auto",padding:12}}>
+      {items.length===0?(<div style={{textAlign:"center",color:"#888",padding:40}}>
+        <Ic n="tag" s={44} c="#888"/><p style={{marginTop:12,fontSize:13}}>No items added</p>
+        <div style={{display:"flex",gap:10,justifyContent:"center",marginTop:14}}>
+          <Btn ch="Browse Catalog" col={C.red} onClick={()=>setQTab("catalog")}/>
+          <Btn ch={<><Ic n="plus" s={13} c="#fff"/>Custom Item</>} col={C.blue} onClick={()=>setShowCustom(true)}/>
+        </div>
+      </div>)
+      :<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <span style={{fontSize:12,color:"#888"}}>{items.length} items</span>
+          <Btn ch={<><Ic n="plus" s={13} c="#fff"/>Custom Item</>} col={C.blue} sz="sm" onClick={()=>setShowCustom(true)}/>
+        </div>
+        {items.map((item,i)=>(<div key={item.id} className="fadeUp" style={{background:"#1a1a1a",borderRadius:12,padding:12,marginBottom:8,border:"1px solid #2a2a2a",animationDelay:i*0.03+"s"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:2,display:"flex",gap:6,alignItems:"center"}}>
+                {item.name}
+                {item.isCustom&&<span style={{background:C.blue+"22",color:C.blue,border:"1px solid "+C.blue+"44",borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>CUSTOM</span>}
+              </div>
+              <div style={{fontSize:11,color:"#888"}}>{lkr(item.price)} / {item.unit}{item.sup&&" · "+item.sup}</div>
+            </div>
+            <button onClick={()=>remItem(item.id)} style={{background:"#3a1a1a",border:"none",borderRadius:6,padding:"5px 7px",cursor:"pointer"}}><Ic n="del" s={14} c={C.red}/></button>
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",background:"#242424",borderRadius:10,overflow:"hidden"}}>
+              <button onClick={()=>updQty(item.id,-1)} style={{background:"none",border:"none",padding:"7px 14px",cursor:"pointer",color:C.red,fontSize:18,fontWeight:700}}>-</button>
+              <span style={{fontFamily:'"Space Mono",monospace',fontWeight:700,minWidth:24,textAlign:"center"}}>{item.qty}</span>
+              <button onClick={()=>updQty(item.id,1)} style={{background:"none",border:"none",padding:"7px 14px",cursor:"pointer",color:C.green,fontSize:18,fontWeight:700}}>+</button>
+            </div>
+            <div style={{fontFamily:'"Space Mono",monospace',fontWeight:700,fontSize:14}}>{lkr(item.price*item.qty)}</div>
+          </div>
+        </div>))}
+        <div style={{background:"linear-gradient(135deg,"+C.red+"22,"+C.red+"11)",border:"1px solid "+C.red+"44",borderRadius:12,padding:"14px 16px",marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontWeight:700,fontSize:16}}>TOTAL</span>
+          <span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,fontSize:22,color:C.red}}>{lkr(total)}</span>
+        </div>
+      </>}
+    </div>)}
+
+    {/* CUSTOMER TAB */}
+    {qTab==="customer"&&(<div style={{flex:1,overflow:"auto",padding:12}}>
+      <Inp lbl="Customer Name" val={customer.name} set={v=>setCustomer(p=>({...p,name:v}))} ph="Full name"/>
+      <Inp lbl="Company" val={customer.company} set={v=>setCustomer(p=>({...p,company:v}))} ph="Company name (optional)"/>
+      <Inp lbl="Phone" val={customer.phone} set={v=>setCustomer(p=>({...p,phone:v}))} type="tel"/>
+      <Inp lbl="Email" val={customer.email} set={v=>setCustomer(p=>({...p,email:v}))} type="email"/>
+      <Textarea lbl="Address" val={customer.address} set={v=>setCustomer(p=>({...p,address:v}))}/>
+      {items.length>0&&<Btn ch={<><Ic n="print" s={14} c="#fff"/>Print Quotation</>} onClick={()=>setShowPrintPicker(true)} col={C.red} full sz="lg" st={{marginTop:8}}/>}
+    </div>)}
+
+    {/* Cable Modal */}
+    {cableModal&&(<div onClick={()=>setCableModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={e=>e.stopPropagation()} className="slideUp" style={{background:"#1a1a1a",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,padding:22,borderTop:"3px solid "+C.gold}}>
+        <div style={{width:38,height:4,background:"#2a2a2a",borderRadius:2,margin:"0 auto 14px"}}/>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>📏 {cableModal.item.name}</div>
+        <div style={{fontSize:11,color:"#888",marginBottom:14}}>1 Roll = 100m · Sell: Rs.{Math.ceil(cableModal.item.cost/100*(1+markup/100)*10)/10}/m</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:14}}>
+          {[10,20,50,60,100].map(m=><button key={m} onClick={()=>setCableM(String(m))} style={{background:cableM===String(m)?C.gold:"#252525",border:"1px solid "+(cableM===String(m)?C.gold:"#2a2a2a"),borderRadius:8,padding:"9px 2px",cursor:"pointer",color:cableM===String(m)?"#000":"#fff",fontWeight:700,fontSize:11}}>{m}m</button>)}
+        </div>
+        <input type="number" value={cableM} onChange={e=>setCableM(e.target.value)} placeholder="Custom meters..." style={{width:"100%",background:"#242424",border:"1.5px solid #2a2a2a",borderRadius:10,padding:"12px 14px",color:"#f0f0f0",fontSize:15,outline:"none",marginBottom:12,boxSizing:"border-box",fontFamily:"inherit"}}/>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setCableModal(null)} style={{flex:1,background:"#252525",border:"none",borderRadius:10,padding:"13px",color:"#fff",cursor:"pointer",fontWeight:700}}>Cancel</button>
+          <button onClick={confirmCable} disabled={!cableM||parseFloat(cableM)<=0} style={{flex:2,background:(!cableM||parseFloat(cableM)<=0)?"#333":C.gold,border:"none",borderRadius:10,padding:"13px",color:(!cableM||parseFloat(cableM)<=0)?"#888":"#000",fontWeight:900,cursor:(!cableM||parseFloat(cableM)<=0)?"not-allowed":"pointer"}}>Add {cableM||"0"}m</button>
+        </div>
+      </div>
+    </div>)}
+
+    {/* Custom Item Modal */}
+    {showCustom&&(<div onClick={()=>setShowCustom(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={e=>e.stopPropagation()} className="slideUp" style={{background:"#1a1a1a",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,padding:22,borderTop:"3px solid "+C.blue}}>
+        <div style={{width:38,height:4,background:"#2a2a2a",borderRadius:2,margin:"0 auto 14px"}}/>
+        <div style={{fontWeight:900,fontSize:16,marginBottom:4,display:"flex",alignItems:"center",gap:8}}><Ic n="pencil" s={18} c={C.blue}/>Add Custom Item</div>
+        <p style={{fontSize:12,color:"#888",marginBottom:14}}>Add any item not in the catalog</p>
+        <Inp lbl="Item Name *" val={custItem.name} set={v=>setCustItem(p=>({...p,name:v}))} ph="e.g. Special Conduit Fitting"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Inp lbl="Price (Rs.) *" val={custItem.price} set={v=>setCustItem(p=>({...p,price:v}))} type="number" ph="0.00"/>
+          <Inp lbl="Qty" val={custItem.qty} set={v=>setCustItem(p=>({...p,qty:v}))} type="number" ph="1"/>
+        </div>
+        <Sel lbl="Unit" val={custItem.unit} set={v=>setCustItem(p=>({...p,unit:v}))} opts={["pcs","m","roll","kg","box","set","pair"]}/>
+        <Textarea lbl="Notes (optional)" val={custItem.notes} set={v=>setCustItem(p=>({...p,notes:v}))} ph="Description or specifications"/>
+        {custItem.name&&custItem.price&&<div style={{background:C.blue+"11",border:"1px solid "+C.blue+"33",borderRadius:8,padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}}><span style={{color:"#888",fontSize:12}}>Total</span><span style={{fontFamily:'"Space Mono",monospace',fontWeight:900,color:C.blue}}>{lkr(parseFloat(custItem.price||0)*parseInt(custItem.qty||1))}</span></div>}
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setShowCustom(false)} style={{flex:1,background:"#252525",border:"none",borderRadius:10,padding:"13px",color:"#fff",cursor:"pointer",fontWeight:700}}>Cancel</button>
+          <Btn ch={<><Ic n="plus" s={13} c="#fff"/>Add to Quote</>} onClick={addCustom} col={C.blue} st={{flex:2,padding:"13px"}} sz="lg"/>
+        </div>
+      </div>
+    </div>)}
+
+    <PrintSizePicker open={showPrintPicker} onClose={()=>setShowPrintPicker(false)} onSelect={sz=>{ printDoc(buildQuoteHTML(sz), sz); }}/>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  APP ROOT
+// ═══════════════════════════════════════════════════════════════════════
+function App() {
+  const [configured,setConfigured]=useState(()=>!!getCfg());
+  const [ready,setReady]=useState(false);
+  const [dbErr,setDbErr]=useState("");
+  const [me,setMe]=useState(null);
+  const [pg,setPg]=useState("dash");
+  const [toast,setToast]=useState(null);
+  const [users,setUsers]=useState([]);
+  const [products,setProducts]=useState([]);
+  const [sales,setSales]=useState([]);
+  const [cheques,setCheques]=useState([]);
+  const [companies,setCompanies]=useState([]);
+  const [expenses,setExpenses]=useState([]);
+  const [bill,setBill]=useState(null);
+  const cartRef=useRef([]);
+  const tRef=useRef(null);
+  const chanRef=useRef(null);
+
+  const merge=(set,item)=>set(prev=>prev.find(x=>x.id===item.id)?prev.map(x=>x.id===item.id?item:x):[...prev,item]);
+  const remove=(set,id)=>set(prev=>prev.filter(x=>x.id!==id));
+
+  const subscribeRT=()=>{
+    if(chanRef.current)_sb.removeChannel(chanRef.current);
+    const tMap={users:setUsers,products:setProducts,sales:setSales,cheques:setCheques,companies:setCompanies,expenses:setExpenses};
+    const ch=_sb.channel("ne-rt-"+Math.random());
+    Object.keys(tMap).forEach(t=>ch.on("postgres_changes",{event:"*",schema:"public",table:t},pl=>{
+      if(pl.eventType==="DELETE")remove(tMap[t],pl.old.id);
+      else merge(tMap[t],{...pl.new.data,id:pl.new.id});
+    }));
+    ch.subscribe();
+    chanRef.current=ch;
+  };
+
+  const loadAll=async()=>{
+    const [u,p,s,c,co,ex]=await Promise.all([
+      DB.getAll("users"),DB.getAll("products"),DB.getAll("sales"),DB.getAll("cheques"),DB.getAll("companies"),
+      DB.getAll("expenses").catch(()=>[])
+    ]);
+    setUsers(u);setProducts(p);setSales(s);setCheques(c);setCompanies(co);setExpenses(ex||[]);
+    return u;
+  };
+
+  useEffect(()=>{
+    if(!configured)return;
+    const cfg=getCfg();if(!cfg)return;
+    initSB(cfg.url,cfg.key);
+    setReady(false);setDbErr("");
+    loadAll()
+      .then(async(users)=>{
+        await DB.seed("users",SEED_USERS);
+        const fresh=await DB.getAll("users");
+        setUsers(fresh);
+        subscribeRT();
+      })
+      .catch(e=>{console.error(e);setDbErr("Connection failed: "+e.message);})
+      .finally(()=>setReady(true));
+    return()=>{if(chanRef.current)_sb.removeChannel(chanRef.current);};
+  },[configured]);
+
+  const toast2=(msg,type="info")=>{setToast({msg,type});clearTimeout(tRef.current);tRef.current=setTimeout(()=>setToast(null),2800);};
+  const login=u=>{setMe(u);setPg("dash");};
+  const logout=()=>{setMe(null);setPg("dash");setBill(null);};
+  const reconfigure=()=>{clearCfg();setConfigured(false);setMe(null);setReady(false);};
+
+  const upsertProduct=async p=>{await DB.put("products",p);merge(setProducts,p);};
+  const deleteProduct=async id=>{await DB.del("products",id);remove(setProducts,id);};
+  const upsertCheque=async c=>{await DB.put("cheques",c);merge(setCheques,c);};
+  const deleteCheque=async id=>{await DB.del("cheques",id);remove(setCheques,id);};
+  const upsertUser=async u=>{await DB.put("users",u);merge(setUsers,u);};
+  const upsertCompany=async c=>{await DB.put("companies",c);merge(setCompanies,c);};
+  const deleteCompany=async id=>{await DB.del("companies",id);remove(setCompanies,id);};
+  const upsertExpense=async e=>{await DB.put("expenses",e);merge(setExpenses,e);};
+  const deleteExpense=async id=>{await DB.del("expenses",id);remove(setExpenses,id);};
+
+  // When a sale completes: save sale, auto-save cheque if payment=cheque
+  const onSaleComplete=async sale=>{
+    await DB.put("sales",sale);
+    setSales(prev=>[...prev,sale]);
+    if(sale.paymentMode==="cheque"&&sale.chqDet){
+      const chq={id:uid(),party:sale.customer,amount:sale.total,bank:sale.chqDet.bank||"",chqNo:sale.chqDet.no||"",issueDate:sale.date,dueDate:"",type:"Received",status:"pending",notes:"Auto from Invoice "+sale.invoiceNo,saleInvoice:sale.invoiceNo,createdAt:new Date().toISOString()};
+      try{await DB.put("cheques",chq);merge(setCheques,chq);}catch(e){}
+    }
+  };
+  const onNewSale=()=>setBill(null);
+
+  if(!configured)return <SetupScreen onConnected={()=>setConfigured(true)}/>;
+  if(!ready)return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+    <div className="floatAnim"><NipponLogo size={72} glow={true}/></div>
+    <div style={{color:"#888",fontSize:14}}>Connecting to database...</div>
+    {dbErr&&(<div style={{maxWidth:320,background:"#3a1a1a",border:"1px solid "+C.red+"44",borderRadius:10,padding:18,textAlign:"center"}}>
+      <p style={{fontSize:12,color:"#ff8888",marginBottom:14,lineHeight:1.5}}>{dbErr}</p>
+      <Btn ch="Reconfigure" col="#252525" onClick={reconfigure}/>
+    </div>)}
+  </div>);
+
+  const ctx={
+    user:me,users,products,sales,cheques,companies,expenses,
+    toast2,login,logout,reconfigure,
+    onSaleComplete,onNewSale,
+    upsertProduct,deleteProduct,
+    upsertCheque,deleteCheque,
+    upsertUser,upsertCompany,deleteCompany,
+    upsertExpense,deleteExpense
+  };
+
+  const pages={dash:Dashboard,prod:ProductsPage,comp:CompaniesPage,chq:ChequesPage,exp:ExpensesPage,accts:AccountsPage,quot:QuotationPage};
+  const renderPOS=()=>(<>
+    <POSPage cartRef={cartRef} onCheckoutDone={inv=>setBill(inv)}/>
+    {bill&&<BillView sale={bill} onNewSale={onNewSale}/>}
+  </>);
+
+  return (<AppCtx.Provider value={ctx}>
+    <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",position:"relative",background:"#0f0f0f"}}>
+      {!me
+        ?<LoginPage/>
+        :<>
+            {pg==="pos"?renderPOS():React.createElement(pages[pg]||Dashboard)}
+            {!(pg==="pos"&&bill)&&<Nav pg={pg} setPg={setPg} user={me}/>}
+          </>
+      }
+      <Toast t={toast}/>
+    </div>
+  </AppCtx.Provider>);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
