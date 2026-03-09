@@ -47,7 +47,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:0.4}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script type="text/babel">
-const {useState,useEffect,useContext,createContext,useRef,useCallback}=React;
+const {useState,useEffect,useContext,createContext,useRef}=React;
 
 // ── COLORS & CONSTANTS ────────────────────────────────────────────────────────
 const C={red:'#CC0000',dark:'#0f0f0f',card:'#1a1a1a',border:'#2a2a2a',text:'#f0f0f0',muted:'#888',gold:'#FFD700',green:'#00C853',blue:'#1976D2',orange:'#FF6D00',purple:'#7B1FA2'};
@@ -412,7 +412,7 @@ let _sb=null;
 const getSB=()=>{
   if(_sb)return _sb;
   const cfg=getCfg();
-  if(!cfg)return null;
+  if(!cfg||cfg.url==='demo')return null;
   _sb=supabase.createClient(cfg.url,cfg.key);
   return _sb;
 };
@@ -424,12 +424,12 @@ const DB={
     return(data||[]).map(r=>{const d=r.data||{};return {...d,id:r.id};});
   },
   put:async(store,item)=>{
-    const sb=getSB();if(!sb)throw new Error('No DB');
+    const sb=getSB();if(!sb)return;
     const{error}=await sb.from(store).upsert({id:item.id,data:item},{onConflict:'id'});
     if(error)throw error;
   },
   del:async(store,id)=>{
-    const sb=getSB();if(!sb)throw new Error('No DB');
+    const sb=getSB();if(!sb)return;
     const{error}=await sb.from(store).delete().eq('id',id);
     if(error)throw error;
   },
@@ -620,7 +620,7 @@ function CatalogBrowser({onAdd,addLabel='+',showAddButton=true}) {
               </div>
               {showAddButton&&<button onClick={()=>onAdd(item)} style={{background:C.red,border:'none',borderRadius:7,width:30,height:30,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,color:'#fff',fontSize:18,fontWeight:900,transition:'transform 0.1s'}}
                 onMouseDown={e=>e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e=>e.currentTarget.style.transform='scale(1)'}>
-                {addLabel}
+                {typeof addLabel==='function'?addLabel(item):addLabel}
               </button>}
             </div>
           );
@@ -693,7 +693,12 @@ function SetupScreen({onConnected}) {
             </div>
           </Card>
         )}
-        {step===1&&<Btn ch="SQL is done — Next Step →" onClick={()=>setStep(2)} full sz="lg"/>}
+        {step===1&&(
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <Btn ch="SQL is done — Next Step →" onClick={()=>setStep(2)} full sz="lg"/>
+            <button onClick={()=>{setCfg({url:'demo',key:'demo'});onConnected();}} style={{background:'none',border:'none',color:C.muted,fontSize:11,cursor:'pointer',textDecoration:'underline',padding:8}}>Skip setup — Use demo mode (login only)</button>
+          </div>
+        )}
         {step===2&&(
           <>
             <Card st={{marginBottom:14}}>
@@ -1698,6 +1703,12 @@ function App() {
   useEffect(()=>{
     if(!configured)return;
     setReady(false);setDbErr('');
+    const cfg=getCfg();
+    if(cfg&&cfg.url==='demo'){
+      setUsers(SEED_USERS);
+      setReady(true);
+      return;
+    }
     (async()=>{
       try{
         const[u,p,s,ch,co]=await Promise.all([DB.getAll('users'),DB.getAll('products'),DB.getAll('sales'),DB.getAll('cheques'),DB.getAll('companies')]);
@@ -1706,7 +1717,6 @@ function App() {
         const freshUsers=await DB.getAll('users');
         setUsers(freshUsers.length>0?freshUsers:SEED_USERS);
         setReady(true);
-        // Realtime
         const sb=getSB();
         if(sb){
           const ch2=sb.channel('ne-realtime');
@@ -1718,7 +1728,7 @@ function App() {
           });
           ch2.subscribe();
         }
-      }catch(e){setDbErr(e.message);}
+      }catch(e){setDbErr(e.message);setUsers(SEED_USERS);setReady(true);}
     })();
   },[configured]);
 
@@ -1739,11 +1749,14 @@ function App() {
   if(!ready)return(
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
       <div className="anim-float"><NipponLogo size={72} glow={true}/></div>
-      <div style={{color:C.muted,fontSize:13}}>Connecting to database…</div>
+      <div style={{color:C.muted,fontSize:13}}>{dbErr?'Connection failed':'Connecting to database…'}</div>
       {dbErr&&(
         <div style={{maxWidth:300,background:'#3a1a1a',border:`1px solid ${C.red}44`,borderRadius:10,padding:16,textAlign:'center'}}>
           <p style={{fontSize:12,color:'#ff8888',marginBottom:12,lineHeight:1.5}}>{dbErr}</p>
-          <Btn ch="Reconfigure" v="out" onClick={reconfigure}/>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <Btn ch="Continue to Login" v="red" onClick={()=>{setUsers(SEED_USERS);setReady(true);}} full/>
+            <Btn ch="Reconfigure" v="out" onClick={reconfigure} full/>
+          </div>
         </div>
       )}
     </div>
