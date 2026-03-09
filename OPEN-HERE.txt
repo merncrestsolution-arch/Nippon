@@ -1,0 +1,20 @@
+NIPPON ELECTRICALS - Smart POS
+================================
+
+TO OPEN THE APP (Laptop or Desktop):
+
+  Double-click:  start.bat
+
+  This starts a local server and opens the app in your browser.
+
+
+IF start.bat DOESN'T WORK:
+
+  1. Install Python from python.org (or Node.js from nodejs.org)
+  2. Open Command Prompt in this folder
+  3. Run:  python -m http.server 8080
+  4. Open browser:  http://localhost:8080/nippon-electricals-pos.html
+
+
+DO NOT double-click the .html file directly - it will not work.
+The app must run from a web server (http://) not from a file (file://).

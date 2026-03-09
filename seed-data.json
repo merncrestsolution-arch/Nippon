@@ -1,0 +1,25 @@
+{
+  "note": "This seed data is loaded automatically on first login. No manual import needed.",
+  "default_login": {
+    "username": "admin",
+    "password": "admin123",
+    "role": "admin"
+  },
+  "users": [
+    {
+      "id": 1,
+      "name": "Admin",
+      "username": "admin",
+      "password": "admin123",
+      "role": "admin",
+      "email": "",
+      "active": true,
+      "avatar": "A"
+    }
+  ],
+  "roles": {
+    "admin": "Full access — all pages including Users management",
+    "manager": "Dashboard, POS, Products, Suppliers, Cheques, Expenses, Quotation",
+    "cashier": "Dashboard, POS, Products only"
+  }
+}
