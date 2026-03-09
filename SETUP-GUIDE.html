@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Nippon Electricals POS — Setup Guide</title>
+<style>
+body{font-family:Arial,sans-serif;background:#0f0f0f;color:#f0f0f0;max-width:700px;margin:0 auto;padding:20px}
+h1{color:#CC0000;font-size:24px;margin-bottom:4px}
+h2{color:#CC0000;font-size:16px;margin:24px 0 10px}
+.step{background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #CC0000;border-radius:8px;padding:16px 18px;margin-bottom:14px}
+.step h3{margin:0 0 8px;font-size:15px;color:#fff}
+.step p,.step li{font-size:13px;color:#ccc;line-height:1.7;margin:4px 0}
+.num{background:#CC0000;color:#fff;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;margin-right:8px;flex-shrink:0}
+.badge{background:#CC000033;color:#CC0000;border:1px solid #CC000066;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700}
+.green{color:#00C853}.gold{color:#FFD700}.blue{color:#1976D2}
+code{background:#242424;border:1px solid #333;padding:2px 7px;border-radius:4px;font-family:monospace;font-size:13px;color:#7ee787}
+.cred{background:#1a3a1a;border:1px solid #00C85344;border-radius:8px;padding:14px;margin:10px 0;text-align:center}
+.cred p{margin:4px 0;font-size:14px}
+.warning{background:#1a1a00;border:1px solid #FFD70044;border-radius:8px;padding:12px;margin:10px 0;font-size:12px;color:#FFD700}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th{background:#CC0000;color:#fff;padding:8px;text-align:left;font-size:12px}
+td{background:#242424;padding:8px;font-size:12px;border-bottom:1px solid #333}
+</style>
+</head>
+<body>
+<h1>🔴 NIPPON ELECTRICALS</h1>
+<p style="color:#888;margin-bottom:24px">Smart POS System — Complete Setup Guide</p>
+
+<h2>📦 Files Included</h2>
+<div class="step">
+  <table>
+    <tr><th>File</th><th>Purpose</th></tr>
+    <tr><td><code>nippon-electricals-pos.html</code></td><td>Main POS Application (open in browser)</td></tr>
+    <tr><td><code>database-setup.sql</code></td><td>Run this in Supabase SQL Editor once</td></tr>
+    <tr><td><code>seed-data.json</code></td><td>Default users and companies reference</td></tr>
+    <tr><td><code>SETUP-GUIDE.html</code></td><td>This guide</td></tr>
+  </table>
+</div>
+
+<h2>🗄️ Step 1 — Create Supabase Account & Project</h2>
+<div class="step">
+  <h3><span class="num">1</span>Go to <span class="blue">supabase.com</span></h3>
+  <p>Click <strong>Start your project</strong> → Sign up (free tier is fine)</p>
+</div>
+<div class="step">
+  <h3><span class="num">2</span>Create New Project</h3>
+  <p>Click <strong>New Project</strong> → Set a project name (e.g. "nippon-pos") → Set a database password → Click Create</p>
+  <p>⏳ Wait 1-2 minutes for the project to spin up</p>
+</div>
+
+<h2>🗃️ Step 2 — Run the Database Script</h2>
+<div class="step">
+  <h3><span class="num">3</span>Open SQL Editor</h3>
+  <p>In your Supabase project → Left sidebar → click <strong>SQL Editor</strong></p>
+</div>
+<div class="step">
+  <h3><span class="num">4</span>Run the Setup Script</h3>
+  <p>Click <strong>New Query</strong> → Open the file <code>database-setup.sql</code> → Copy all contents → Paste into editor → Click <strong>RUN</strong></p>
+  <p class="green">✓ You should see "Success. No rows returned"</p>
+</div>
+
+<h2>🔑 Step 3 — Get API Credentials</h2>
+<div class="step">
+  <h3><span class="num">5</span>Find Your Credentials</h3>
+  <p>In Supabase → Left sidebar → <strong>Project Settings</strong> → <strong>API</strong></p>
+  <p>You need TWO things:</p>
+  <ul>
+    <li><strong>Project URL</strong> — looks like <code>https://abcdefgh.supabase.co</code></li>
+    <li><strong>Anon / Public Key</strong> — long string starting with <code>eyJhbGci...</code></li>
+  </ul>
+  <div class="warning">⚠️ Copy the ANON key (not the Service Role key)</div>
+</div>
+
+<h2>🚀 Step 4 — Launch the App</h2>
+<div class="step">
+  <h3><span class="num">6</span>Open the HTML File</h3>
+  <p>Open <code>nippon-electricals-pos.html</code> in any modern browser (Chrome recommended)</p>
+  <p>First time it shows the <strong>Setup Wizard</strong></p>
+</div>
+<div class="step">
+  <h3><span class="num">7</span>Connect to Database</h3>
+  <p>Step 1 of wizard: Read instructions → Click "Done — Next Step"</p>
+  <p>Step 2 of wizard: Paste your <strong>Project URL</strong> and <strong>Anon Key</strong> → Click <strong>Connect & Launch</strong></p>
+  <p class="green">✓ If successful, it will load the login screen</p>
+</div>
+
+<h2>👤 Step 5 — Login</h2>
+<div class="step">
+  <h3><span class="num">8</span>Default Login Credentials</h3>
+  <div class="cred">
+    <p>Username: <code>admin</code></p>
+    <p>Password: <code>admin123</code></p>
+  </div>
+  <p>You can add more users from the <strong>Users</strong> tab after logging in as admin</p>
+</div>
+
+<h2>👥 User Roles</h2>
+<div class="step">
+  <table>
+    <tr><th>Role</th><th>Access</th></tr>
+    <tr><td><span style="color:#CC0000;font-weight:700">Admin</span></td><td>Everything — Dashboard, POS, Products, Companies, Cheques, Quotation, Users</td></tr>
+    <tr><td><span style="color:#1976D2;font-weight:700">Manager</span></td><td>Dashboard, POS, Products, Companies, Cheques, Quotation</td></tr>
+    <tr><td><span style="color:#00C853;font-weight:700">Cashier</span></td><td>Dashboard and POS only</td></tr>
+  </table>
+</div>
+
+<h2>❓ Troubleshooting</h2>
+<div class="step">
+  <h3>Login not working?</h3>
+  <ul>
+    <li>Make sure you ran the SQL script first</li>
+    <li>Try username: <code>admin</code> password: <code>admin123</code> (exact, case sensitive)</li>
+    <li>Go to Accounts tab → Reconfigure Database if needed</li>
+  </ul>
+</div>
+<div class="step">
+  <h3>Connection failed?</h3>
+  <ul>
+    <li>Check you copied the correct Supabase URL (not the Dashboard URL)</li>
+    <li>Make sure you used the <strong>anon/public</strong> key, not the service role key</li>
+    <li>Confirm the SQL script ran successfully with no errors</li>
+  </ul>
+</div>
+<div class="step">
+  <h3>Need to reconnect to a different database?</h3>
+  <p>Login → Users tab (admin only) → Scroll down → Click <strong>Reconfigure Database Connection</strong></p>
+</div>
+
+<div style="margin-top:30px;padding:16px;background:#1a0000;border:1px solid #CC000044;border-radius:8px;text-align:center">
+  <p style="color:#CC0000;font-weight:700;font-size:15px">NIPPON ELECTRICALS Smart POS</p>
+  <p style="color:#888;font-size:12px">Built for Sri Lanka electrical retail &bull; Supports LKR currency &bull; 500+ supplier products</p>
+</div>
+</body>
+</html>

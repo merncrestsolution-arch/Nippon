@@ -1,0 +1,112 @@
+{
+  "description": "Nippon Electricals POS \u2014 Seed Data",
+  "version": "v7",
+  "tables": {
+    "users": [
+      {
+        "id": 1,
+        "name": "Admin",
+        "username": "admin",
+        "password": "admin123",
+        "role": "admin",
+        "email": "",
+        "active": true,
+        "avatar": "A"
+      },
+      {
+        "id": 2,
+        "name": "Manager",
+        "username": "manager",
+        "password": "manager123",
+        "role": "manager",
+        "email": "",
+        "active": true,
+        "avatar": "M"
+      },
+      {
+        "id": 3,
+        "name": "Cashier",
+        "username": "cashier",
+        "password": "cashier123",
+        "role": "cashier",
+        "email": "",
+        "active": true,
+        "avatar": "C"
+      }
+    ],
+    "products": [],
+    "sales": [],
+    "cheques": [],
+    "companies": [
+      {
+        "id": 101,
+        "name": "Kevilton Electrical Products",
+        "type": "Supplier",
+        "contactPerson": "",
+        "phone": "",
+        "email": "",
+        "address": "Sri Lanka",
+        "paymentTerms": "30 days",
+        "notes": "Switches, Sockets, MCBs, Conduit",
+        "active": true
+      },
+      {
+        "id": 102,
+        "name": "ACL Cables",
+        "type": "Manufacturer",
+        "contactPerson": "",
+        "phone": "",
+        "email": "",
+        "address": "Sri Lanka",
+        "paymentTerms": "30 days",
+        "notes": "Wires and Cables",
+        "active": true
+      },
+      {
+        "id": 103,
+        "name": "Kelani Cables",
+        "type": "Manufacturer",
+        "contactPerson": "",
+        "phone": "",
+        "email": "",
+        "address": "Sri Lanka",
+        "paymentTerms": "30 days",
+        "notes": "Building Wires",
+        "active": true
+      },
+      {
+        "id": 104,
+        "name": "Green Electric",
+        "type": "Supplier",
+        "contactPerson": "",
+        "phone": "",
+        "email": "",
+        "address": "Sri Lanka",
+        "paymentTerms": "30 days",
+        "notes": "LED Lighting, Flood Lights",
+        "active": true
+      },
+      {
+        "id": 105,
+        "name": "Dimo Lumin",
+        "type": "Distributor",
+        "contactPerson": "",
+        "phone": "",
+        "email": "",
+        "address": "Sri Lanka",
+        "paymentTerms": "30 days",
+        "notes": "LED Bulbs, Emergency Lights",
+        "active": true
+      }
+    ]
+  },
+  "default_login": {
+    "username": "admin",
+    "password": "admin123"
+  },
+  "roles": {
+    "admin": "Full access to all features",
+    "manager": "Dashboard, POS, Products, Companies, Cheques, Quotation",
+    "cashier": "Dashboard and POS only"
+  }
+}
